@@ -14,14 +14,14 @@ func databaseFire() *sql.DB {
 	return database
 }
 
-func ExecSQL(sql string, c chan sql.Result) {
-	exec, _ := database.Exec(sql)
-	c <- exec
+func ExecSQL(sql string, c chan ExecSQLType) {
+	exec, err := database.Exec(sql)
+	c <- ExecSQLType{exec, err}
 }
 
-func QuerySQL(sql string, c chan *sql.Rows) {
-	query, _ := database.Query(sql)
-	c <- query
+func QuerySQL(sql string, c chan QuerySQLType) {
+	query, err := database.Query(sql)
+	c <- QuerySQLType{query, err}
 }
 
 func QueryRowSQL(sql string, c chan *sql.Row) {

@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"model"
 	"net/http"
+	"responses"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -21,7 +21,7 @@ func SetHeaderParameter(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 }
 
-func GetTokenHeader(r *http.Request) bool {
+func GetTokenHeader(r *http.Request) (bool, int, string, string) {
 	authHeader := r.Header.Get("Authorization")
 	splitToken := strings.Split(authHeader, "Asolole ")
 	token := splitToken[len(splitToken)-1]
@@ -30,16 +30,22 @@ func GetTokenHeader(r *http.Request) bool {
 	sequel := fmt.Sprintf("select mobile_phone from users where token = '%s'", token)
 	row := ExecuteChanelSqlRow(sequel).Scan(&mobilePhone)
 	switch {
-	case row == sql.ErrNoRows:
-		fmt.Println("no rows")
-		return false
 	case row != nil:
-		fmt.Println(row.Error())
-		return false
+		messageArr := strings.Split(row.Error(), ": ")
+		message := messageArr[len(messageArr)-1]
+		return false, 500, message, ""
+	case row == sql.ErrNoRows:
+		return false, 404, "token not satisfied to any credential", ""
 	default:
 		hashedTokenBytes := []byte(token)
 		mobileBytes := []byte(mobilePhone)
-		return bcrypt.CompareHashAndPassword(hashedTokenBytes, mobileBytes) == nil
+		switch bcrypt.CompareHashAndPassword(hashedTokenBytes, mobileBytes) == nil {
+		case false:
+			return false, 401, "invalid token", ""
+		default:
+			return true, 200, "welcome to the club", mobilePhone
+
+		}
 	}
 }
 
@@ -49,19 +55,16 @@ func StringtoInt(integer string) int {
 }
 
 func OutputError(status int, message string) string {
-	globalExecutionErrorMessage.Store(model.ErrorMessage{status, message})
-	dataErrorMessage := globalExecutionErrorMessage.Load().(model.ErrorMessage)
+	globalExecutionErrorMessage.Store(responses.ErrorMessage{status, message})
+	dataErrorMessage := globalExecutionErrorMessage.Load().(responses.ErrorMessage)
 	output, _ := json.Marshal(dataErrorMessage)
 	return string(output)
 }
 
-func OutputSuccess(status int, message string, user model.User) string {
-	globalExecutionSuccessMessage.Store(model.SuccessMessage{status, message, user})
-	SuccessMessageMessage := globalExecutionSuccessMessage.Load().(model.SuccessMessage)
-	output, _ := json.Marshal(SuccessMessageMessage)
+func OutputSuccess(status int, message string, v interface{}) string {
+	output, _ := json.Marshal(responses.GeneralMessage{status, message, v})
 	return string(output)
 }
-
 func DBErrorParser(err string) (string, int64) {
 	Parts := strings.Split(err, ":")
 	errorMessage := Parts[1]
