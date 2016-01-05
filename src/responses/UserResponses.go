@@ -13,9 +13,7 @@ type GeneralMsg struct {
 }
 
 type GeneralArrMsg struct {
-	Status  int           `json:"status"`
-	Message string        `json:"message"`
-	Datas   []interface{} `json:"data"`
+	Datas []interface{} `json:"data"`
 }
 
 type UserCreated struct {

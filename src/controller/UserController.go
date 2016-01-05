@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -46,7 +45,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 			go mapUsers(rows, chanUsers)
 			resChanUsers := <-chanUsers
 
-			fmt.Fprintf(w, service.OutputSuccess(status, message, resChanUsers))
+			fmt.Fprintf(w, service.OutputSuccess(200, "success", resChanUsers))
 		}
 	}
 }
@@ -186,7 +185,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		file, header, err := r.FormFile("file")
 
 		if err != nil {
-			printError(w, err)
+			printUploadError(w, err)
 			return
 		}
 
@@ -212,14 +211,14 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		pathFile, nameFile, err := service.GenerateNewPath(targetPath, fileType)
 
 		if err != nil {
-			printError(w, err)
+			printUploadError(w, err)
 			return
 		}
 
 		out, err := service.CreateFile(pathFile)
 
 		if err != nil {
-			printError(w, err)
+			printUploadError(w, err)
 			return
 		}
 
@@ -232,7 +231,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		errCopy := rcvChannelCopyFile.Err
 		if errCopy != nil {
-			printError(w, err)
+			printUploadError(w, err)
 			return
 		}
 
@@ -252,10 +251,8 @@ func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) {
 		go assignedMapedUsers(rows, chanUser)
 		resChanUser := <-chanUser
 		users.Datas = append(users.Datas, resChanUser)
+		runtime.Gosched()
 	}
-
-	users.Status = 200
-	users.Message = "success"
 	chanUsers <- users
 }
 
@@ -300,7 +297,7 @@ func allowedImageType(contentType string) bool {
 	return isImageAllowed
 }
 
-func printError(w http.ResponseWriter, err error) {
+func printUploadError(w http.ResponseWriter, err error) {
 	if err != nil {
 		w.WriteHeader(406)
 		fmt.Fprintf(w, service.OutputError(406, err.Error()))
@@ -366,11 +363,4 @@ func newUserJson(body io.ReadCloser) requests.User {
 	NewUser := requests.User{}
 	decoder.Decode(&NewUser)
 	return NewUser
-}
-
-func getUserId(r http.Request) int {
-	urlParams := r.URL.Query()
-	idString := urlParams.Get(":id")
-	idInt, _ := strconv.Atoi(idString)
-	return idInt
 }
