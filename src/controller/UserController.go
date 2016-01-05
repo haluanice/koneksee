@@ -193,7 +193,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		fileTypeArr := strings.Split(fileName, ".")
 		fileType := fileTypeArr[len(fileTypeArr)-1]
 
-		if allowedImageType(fileType) {
+		if !allowedImageType(fileType) {
 			w.WriteHeader(http.StatusUnsupportedMediaType)
 			infoMessage := "type is not allowed"
 			infoError := infoMessage
