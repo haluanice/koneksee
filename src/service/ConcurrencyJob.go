@@ -35,11 +35,6 @@ func ExecuteChanelSqlRow(sequel string) *sql.Row {
 	return getRow
 }
 
-func ExecuteCopyFile(out *os.File, file multipart.File) {
-	copied, err := io.Copy(out, file)
-	ChannelCopyFile <- CopyFileType{copied, err}
-}
-
 func ExecuteChanelSqlRows(sequel string) (*sql.Rows, error) {
 	go QuerySQL(sequel, ChanelSqlRows)
 	getRows := <-ChanelSqlRows
@@ -54,7 +49,6 @@ func ExecuteChanelSqlResult(sequel string) (sql.Result, error) {
 
 func GenerateNewPath(path string, fileType string) (pathFile string, nameFile string, err error) {
 	uuid, err := exec.Command("uuidgen").Output()
-	//t := time.Now().Format(time.RFC850)
 	nameFile = fmt.Sprintf("%x.%s", uuid, fileType)
 	pathFile = fmt.Sprintf("%s%s", path, nameFile)
 	return
@@ -63,4 +57,9 @@ func GenerateNewPath(path string, fileType string) (pathFile string, nameFile st
 func CreateFile(pathFile string) (output *os.File, err error) {
 	output, err = os.Create(pathFile)
 	return
+}
+
+func ExecuteCopyFile(out *os.File, file multipart.File) {
+	copied, err := io.Copy(out, file)
+	ChannelCopyFile <- CopyFileType{copied, err}
 }

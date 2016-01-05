@@ -1,11 +1,9 @@
 // main
 package main
 
-import (
-	"runtime"
-)
+import "runtime"
 
 func main() {
-	runtime.GOMAXPROCS(4)
-	Routes()
+	runtime.GOMAXPROCS(runtime.NumCPU())
+	defer Routes()
 }

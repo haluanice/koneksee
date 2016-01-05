@@ -1,9 +1,9 @@
 CREATE TABLE `users` (
   `user_id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `user_nickname` varchar(32) NOT NULL,
-  `user_first` varchar(32) NOT NULL,
-  `user_last` varchar(32) NOT NULL,
-  `user_email` varchar(128) NOT NULL,
+  `user_name` varchar(32) NOT NULL,
+  `mobile_phone` varchar(19) NOT NULL,
+  `profile_picture` varchar(128) NOT NULL,
+  `token` varchar(128) NOT NULL,
   PRIMARY KEY (`user_id`),
-  UNIQUE KEY `user_nickname` (`user_nickname`)
+  UNIQUE KEY `uq_mobile_phone` (`mobile_phone`)
 ) ENGINE=InnoDB AUTO_INCREMENT=38 DEFAULT CHARSET=utf8;

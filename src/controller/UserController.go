@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -188,7 +189,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			printError(w, err)
 			return
 		}
-		defer file.Close()
 
 		fileName := header.Filename
 		fileTypeArr := strings.Split(fileName, ".")
@@ -222,10 +222,13 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 			printError(w, err)
 			return
 		}
-		defer out.Close()
 
 		go service.ExecuteCopyFile(out, file)
+		runtime.Gosched()
+
 		rcvChannelCopyFile := <-service.ChannelCopyFile
+		out.Close()
+		file.Close()
 
 		errCopy := rcvChannelCopyFile.Err
 		if errCopy != nil {
@@ -243,6 +246,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) {
 	users := atomicUsers(responses.GeneralArrMsg{})
 	chanUser := make(chan requests.User)
+	runtime.Gosched()
 
 	for rows.Next() {
 		go assignedMapedUsers(rows, chanUser)
@@ -256,6 +260,7 @@ func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) {
 }
 
 func assignedMapedUsers(rows *sql.Rows, chanUser chan requests.User) {
+	runtime.Gosched()
 	user := atomicUser(requests.User{})
 	rows.Scan(&user.UserId, &user.UserName, &user.MobilePhone, &user.ProfilePicture)
 	chanUser <- user
