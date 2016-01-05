@@ -31,9 +31,10 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
 		cases := r.FormValue("phone_list")
-		sequel := "select user_id, user_name, mobile_phone, profile_picture from users"
-		if cases != "" {
-			sequel = "select user_id, user_name, mobile_phone, profile_picture from users where mobile_phone in (" + cases + ")"
+
+		sequel = "select user_id, user_name, mobile_phone, profile_picture from users where mobile_phone in (" + cases + ")"
+		if cases == "" {
+			sequel := "select user_id, user_name, mobile_phone, profile_picture from users"
 		}
 		rows, err := service.ExecuteChanelSqlRows(sequel)
 		if err != nil {
