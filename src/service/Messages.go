@@ -1,7 +1,6 @@
 package service
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 var globalExecutionSuccessMessage atomic.Value
@@ -21,31 +18,19 @@ func SetHeaderParameter(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 }
 
-func GetTokenHeader(r *http.Request) (bool, int, string, string) {
+func GetTokenHeader(r *http.Request) (int, string, string) {
 	authHeader := r.Header.Get("Authorization")
 	splitToken := strings.Split(authHeader, "Asolole ")
 	token := splitToken[len(splitToken)-1]
 
 	mobilePhone := ""
 	sequel := fmt.Sprintf("select mobile_phone from users where token = '%s'", token)
-	row := ExecuteChanelSqlRow(sequel).Scan(&mobilePhone)
-	switch {
-	case row != nil:
-		messageArr := strings.Split(row.Error(), ": ")
-		message := messageArr[len(messageArr)-1]
-		return false, 500, message, ""
-	case row == sql.ErrNoRows:
-		return false, 404, "token not satisfied to any credential", ""
-	default:
-		hashedTokenBytes := []byte(token)
-		mobileBytes := []byte(mobilePhone)
-		switch bcrypt.CompareHashAndPassword(hashedTokenBytes, mobileBytes) == nil {
-		case false:
-			return false, 401, "invalid token", ""
-		default:
-			return true, 200, "welcome to the club", mobilePhone
-
-		}
+	err := ExecuteChanelSqlRow(sequel).Scan(&mobilePhone)
+	status, message := CheckScanRowSQL(err)
+	if status != 200 {
+		return status, message, ""
+	} else {
+		return 200, "", mobilePhone
 	}
 }
 
@@ -62,7 +47,7 @@ func OutputError(status int, message string) string {
 }
 
 func OutputSuccess(status int, message string, v interface{}) string {
-	output, _ := json.Marshal(responses.GeneralMessage{status, message, v})
+	output, _ := json.Marshal(responses.GeneralMsg{status, message, v})
 	return string(output)
 }
 func DBErrorParser(err string) (string, int64) {

@@ -23,10 +23,10 @@ var globalExecutionUser atomic.Value
 var globalExecutionUsers atomic.Value
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
-	isValid, status, message, _ := service.GetTokenHeader(r)
+	status, message, _ := service.GetTokenHeader(r)
 	service.SetHeaderParameter(w)
-	switch isValid {
-	case false:
+	switch {
+	case status != 200:
 		w.WriteHeader(status)
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
@@ -40,21 +40,20 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(500)
 			fmt.Fprintf(w, service.OutputError(500, err.Error()))
 		} else {
-			chanUsers := make(chan responses.Users)
+			chanUsers := make(chan responses.GeneralArrMsg)
 			go mapUsers(rows, chanUsers)
 			resChanUsers := <-chanUsers
 
-			output, _ := json.Marshal(resChanUsers)
-			fmt.Fprintln(w, string(output))
+			fmt.Fprintf(w, service.OutputSuccess(status, message, resChanUsers))
 		}
 	}
 }
 
 func GetUser(w http.ResponseWriter, r *http.Request) {
-	isValid, status, message, _ := service.GetTokenHeader(r)
+	status, message, _ := service.GetTokenHeader(r)
 	service.SetHeaderParameter(w)
-	switch isValid {
-	case false:
+	switch {
+	case status != 200:
 		w.WriteHeader(status)
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
@@ -140,9 +139,9 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	service.SetHeaderParameter(w)
 
-	isValid, status, message, mobilePhone := service.GetTokenHeader(r)
-	switch isValid {
-	case false:
+	status, message, mobilePhone := service.GetTokenHeader(r)
+	switch {
+	case status != 200:
 		w.WriteHeader(status)
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
@@ -155,10 +154,10 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func DeleteUser(w http.ResponseWriter, r *http.Request) {
-	isValid, status, message, mobilePhone := service.GetTokenHeader(r)
+	status, message, mobilePhone := service.GetTokenHeader(r)
 	service.SetHeaderParameter(w)
-	switch isValid {
-	case false:
+	switch {
+	case status != 200:
 		w.WriteHeader(status)
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
@@ -175,16 +174,17 @@ func DeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
-	isValid, status, message, mobilePhone := service.GetTokenHeader(r)
+	status, message, mobilePhone := service.GetTokenHeader(r)
 	service.SetHeaderParameter(w)
-	switch isValid {
-	case false:
+	switch {
+	case status != 200:
 		w.WriteHeader(status)
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
 		file, header, err := r.FormFile("file")
-		printError(w, err)
+
 		if err != nil {
+			printError(w, err)
 			return
 		}
 		defer file.Close()
@@ -192,28 +192,33 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		fileName := header.Filename
 		fileTypeArr := strings.Split(fileName, ".")
 		fileType := fileTypeArr[len(fileTypeArr)-1]
-		if !allowedImageType(fileType) {
+
+		if allowedImageType(fileType) {
 			w.WriteHeader(http.StatusUnsupportedMediaType)
-			infoMessage := fmt.Sprintf("type .%s is not allowed", fileType)
+			infoMessage := "type is not allowed"
 			infoError := infoMessage
 			fmt.Fprintf(w, service.OutputError(415, infoError))
 			return
 		}
 
 		pwd, _ := os.Getwd()
+
 		staticPath := "/static/"
+
 		targetPath := pwd + staticPath
 		isDirectoryExists(targetPath)
 
 		pathFile, nameFile, err := service.GenerateNewPath(targetPath, fileType)
-		printError(w, err)
+
 		if err != nil {
+			printError(w, err)
 			return
 		}
 
 		out, err := service.CreateFile(pathFile)
-		printError(w, err)
+
 		if err != nil {
+			printError(w, err)
 			return
 		}
 		defer out.Close()
@@ -223,7 +228,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		errCopy := rcvChannelCopyFile.Err
 		if errCopy != nil {
-			fmt.Fprintf(w, service.OutputError(500, errCopy.Error()))
+			printError(w, err)
 			return
 		}
 
@@ -234,8 +239,8 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 //User Controller Private Function
-func mapUsers(rows *sql.Rows, chanUsers chan responses.Users) {
-	users := atomicUsers(responses.Users{})
+func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) {
+	users := atomicUsers(responses.GeneralArrMsg{})
 	chanUser := make(chan requests.User)
 
 	for rows.Next() {
@@ -344,9 +349,9 @@ func atomicUser(user requests.User) requests.User {
 	return dataUser
 }
 
-func atomicUsers(users responses.Users) responses.Users {
+func atomicUsers(users responses.GeneralArrMsg) responses.GeneralArrMsg {
 	globalExecutionUsers.Store(users)
-	dataUsers := globalExecutionUsers.Load().(responses.Users)
+	dataUsers := globalExecutionUsers.Load().(responses.GeneralArrMsg)
 	return dataUsers
 }
 

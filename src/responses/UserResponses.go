@@ -6,13 +6,13 @@ type ErrorMessage struct {
 	Message string `json:"message"`
 }
 
-type GeneralMessage struct {
+type GeneralMsg struct {
 	Status  int         `json:"status"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data"`
 }
 
-type Users struct {
+type GeneralArrMsg struct {
 	Status  int           `json:"status"`
 	Message string        `json:"message"`
 	Datas   []interface{} `json:"data"`
@@ -23,10 +23,4 @@ type UserCreated struct {
 	UserName    string `json:"user_name"`
 	MobilePhone string `json:"mobile_phone"`
 	Token       string `json:"token"`
-}
-
-type UserCreatedMessage struct {
-	Status  int         `json:"status"`
-	Message string      `json:"message"`
-	Data    UserCreated `json:"data"`
 }
