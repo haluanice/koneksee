@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync/atomic"
 
 	"encoding/json"
@@ -18,8 +17,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var globalExecutionUser atomic.Value
-var globalExecutionUsers atomic.Value
+var (
+	globalExecutionUser  atomic.Value
+	globalExecutionUsers atomic.Value
+)
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
 	status, message, mobilePhone, _ := service.GetTokenHeader(r.Header.Get("Authorization"))
@@ -30,10 +31,10 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, service.OutputError(status, message))
 	case true:
 		cases := r.FormValue("phone_list")
-		sequel := fmt.Sprintf("select user_id, user_name, mobile_phone, profile_picture from users where mobile_phone in "+
-			"(%s) and mobile_phone not in "+
-			" (select friend from users u join friends_relationship fr "+
-			" on u.`mobile_phone` = fr.`user` where u.`mobile_phone` = '%s' )", cases, mobilePhone)
+		sequel := fmt.Sprintf("SELECT user_id, user_name, mobile_phone, profile_picture FROM users WHERE mobile_phone IN "+
+			"(%s) AND mobile_phone NOT IN "+
+			" (SELECT friend FROM users u JOIN friends_relationship fr "+
+			" ON u.`mobile_phone` = fr.`user` WHERE u.`mobile_phone` = '%s' )", cases, mobilePhone)
 		if cases == "" {
 			sequel = "select user_id, user_name, mobile_phone, profile_picture from users"
 		}
@@ -44,12 +45,12 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			chanUsers := make(chan responses.GeneralArrMsg)
 			go mapUsers(rows, chanUsers)
-
 			select {
 			case resChanUsers := <-chanUsers:
 				fmt.Fprintf(w, service.OutputSuccess(200, "success", resChanUsers))
 			case <-service.TimeOutInMilis(service.GlobalTimeOutDB):
-				fmt.Fprintf(w, service.OutputError(500, "rto"))
+				close(chanUsers)
+				fmt.Fprintf(w, service.OutputError(500, "request time out"))
 			}
 		}
 	}
@@ -66,8 +67,8 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 		urlParams := r.URL.Query()
 		id := urlParams.Get(":id")
 		user := atomicUser(requests.User{})
-		sequel := fmt.Sprintf("select user_id, user_name, mobile_phone, profile_picture from users where user_id = %s", id)
-
+		condition := fmt.Sprintf("user_id = %v", id)
+		sequel := service.SelectQuery("user_id, user_name, mobile_phone, profile_picture", "users", condition)
 		sqlRow, err := service.ExecuteChannelSqlRow(sequel)
 		switch {
 		case err != nil:
@@ -93,8 +94,7 @@ func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
 	userTokenJson := requests.UserTokenJson{}
 	service.DecodeJson(&userTokenJson, r.Body)
 	user_id := 0
-	sequel := fmt.Sprintf("select user_id from users where mobile_phone = '%s'", userTokenJson.MobilePhone)
-	sqlRow, err := service.ExecuteChannelSqlRow(sequel)
+	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(userTokenJson.MobilePhone))
 	switch {
 	case err != nil:
 		w.WriteHeader(508)
@@ -243,8 +243,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 		chanCopyFile := make(chan service.CopyFileType)
 		go service.ExecuteCopyFile(out, file, chanCopyFile)
-		runtime.Gosched()
-
 		select {
 		case rcvChannelCopyFile := <-chanCopyFile:
 			out.Close()
@@ -363,9 +361,7 @@ func decodeActionFriendMobilePhone(body io.ReadCloser) string {
 
 func hideOrBlockFriend(mobilePhone string, friendMobilePhone string, status int) (int, string) {
 	friendUserId := 0
-
-	sequel := fmt.Sprintf("SELECT user_id FROM users where mobile_phone = '%s'", friendMobilePhone)
-	sqlRow, err := service.ExecuteChannelSqlRow(sequel)
+	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(friendMobilePhone))
 	switch {
 	case err != nil:
 		return 508, err.Error()
@@ -398,23 +394,21 @@ func hideOrBlockFriend(mobilePhone string, friendMobilePhone string, status int)
 func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) chan responses.GeneralArrMsg {
 	users := atomicUsers(responses.GeneralArrMsg{})
 	chanUser := make(chan requests.User)
-	runtime.Gosched()
-
 	for rows.Next() {
 		go assignedMapedUsers(rows, chanUser)
 		resChanUser := <-chanUser
 		users.Datas = append(users.Datas, resChanUser)
-		runtime.Gosched()
 	}
 	chanUsers <- users
+	close(chanUsers)
 	return chanUsers
 }
 
 func assignedMapedUsers(rows *sql.Rows, chanUser chan requests.User) chan requests.User {
-	runtime.Gosched()
 	user := atomicUser(requests.User{})
 	rows.Scan(&user.UserId, &user.UserName, &user.MobilePhone, &user.ProfilePicture)
 	chanUser <- user
+	close(chanUser)
 	return chanUser
 }
 
@@ -485,4 +479,9 @@ func printUploadError(w http.ResponseWriter, err error) {
 		w.WriteHeader(406)
 		fmt.Fprintf(w, service.OutputError(406, err.Error()))
 	}
+}
+
+func getUserIdSQL(mobilePhone string) string {
+	condition := fmt.Sprintf(" mobile_phone = '%s'", mobilePhone)
+	return service.SelectQuery("user_id", "users", condition)
 }

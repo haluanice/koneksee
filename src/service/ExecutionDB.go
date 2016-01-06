@@ -14,21 +14,24 @@ func databaseFire() *sql.DB {
 	return database
 }
 
-func ExecSQL(sql string, chanel chan ExecSQLType) chan ExecSQLType {
+func ExecSQL(sql string, channel chan ExecSQLType) chan ExecSQLType {
 	exec, err := database.Exec(sql)
-	chanel <- ExecSQLType{exec, err}
-	return chanel
+	channel <- ExecSQLType{exec, err}
+	close(channel)
+	return channel
 
 }
 
-func QuerySQL(sql string, chanel chan QuerySQLType) chan QuerySQLType {
+func QuerySQL(sql string, channel chan QuerySQLType) chan QuerySQLType {
 	query, err := database.Query(sql)
-	chanel <- QuerySQLType{query, err}
-	return chanel
+	channel <- QuerySQLType{query, err}
+	close(channel)
+	return channel
 }
 
-func QueryRowSQL(sql string, chanel chan *sql.Row) chan *sql.Row {
+func QueryRowSQL(sql string, channel chan *sql.Row) chan *sql.Row {
 	query := database.QueryRow(sql)
-	chanel <- query
-	return chanel
+	channel <- query
+	close(channel)
+	return channel
 }

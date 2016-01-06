@@ -49,6 +49,7 @@ func ExecuteChannelSqlRow(sequel string) (*sql.Row, error) {
 	case getRow := <-channelSqlRow:
 		return getRow, nil
 	case <-TimeOutInMilis(GlobalTimeOutDB):
+		close(channelSqlRow)
 		return nil, rtoErrMsg
 	}
 }
@@ -56,11 +57,11 @@ func ExecuteChannelSqlRow(sequel string) (*sql.Row, error) {
 func ExecuteChannelSqlRows(sequel string) (*sql.Rows, error) {
 	chanSqlRows := make(chan QuerySQLType)
 	go QuerySQL(sequel, chanSqlRows)
-
 	select {
 	case getRows := <-chanSqlRows:
 		return getRows.SQLRows, getRows.Error
 	case <-TimeOutInMilis(GlobalTimeOutDB):
+		close(chanSqlRows)
 		return nil, rtoErrMsg
 	}
 }
@@ -87,6 +88,7 @@ func ExecuteInsertSqlResult(sequel string) (int, string, int64) {
 			}
 		}
 	case <-TimeOutInMilis(GlobalTimeOutDB):
+		close(channelSqlResult)
 		return 500, rtoErrMsg.Error(), 0
 	}
 }
@@ -111,6 +113,7 @@ func ExecuteChannelSqlResult(sequel string) (int, string) {
 			}
 		}
 	case <-TimeOutInMilis(GlobalTimeOutDB):
+		close(channelSqlResult)
 		return 500, rtoErrMsg.Error()
 	}
 }
