@@ -7,13 +7,16 @@ import (
 	"mime/multipart"
 	"os"
 	"os/exec"
+	"time"
+	"errors"
+	"sync"
 )
 
-var ChanelSqlRows = make(chan QuerySQLType)
-var ChanelSqlRow = make(chan *sql.Row)
-var ChanelSqlResult = make(chan ExecSQLType)
-var ChanelCopyFile = make(chan CopyFileType)
 
+var MutexVar sync.Mutex
+func TimeOutInMilis(duration time.Duration) <-chan time.Time{
+	return time.After(duration * time.Millisecond)
+}
 type ExecSQLType struct {
 	SQLResult sql.Result
 	Error     error
@@ -28,61 +31,88 @@ type CopyFileType struct {
 	Copy int64
 	Err  error
 }
+var rtoErrMsg = errors.New("request time out")
 
-func ExecuteChanelSqlRow(sequel string) *sql.Row {
-	go QueryRowSQL(sequel, ChanelSqlRow)
-	getRow := <-ChanelSqlRow
-	return getRow
+func MutexTime(){
+	MutexVar.Lock()
+	defer MutexVar.Unlock()
 }
 
-func ExecuteChanelSqlRows(sequel string) (*sql.Rows, error) {
-	go QuerySQL(sequel, ChanelSqlRows)
-	getRows := <-ChanelSqlRows
-	return getRows.SQLRows, getRows.Error
-}
-
-func ExecuteInsertSqlResult(sequel string) (int, string, int64) {
-	go ExecSQL(sequel, ChanelSqlResult)
-	getResult := <-ChanelSqlResult
-	err := getResult.Error
-	if err != nil{
-		status, message := ErrorMessageDB(err.Error())
-		return status, message, 0
-	}else{
-		sqlResult := getResult.SQLResult
-		affectedRow, _ := sqlResult.RowsAffected()
-		newId, _ := sqlResult.LastInsertId()
-		
-		switch{
-		case affectedRow < int64(1):
-			return 422, "data not efefcted", 0
-		default:
-			return 200, "success", newId
-		} 
+func ExecuteChannelSqlRow(sequel string) (*sql.Row, error) {
+	channelSqlRow := make(chan *sql.Row)
+	go QueryRowSQL(sequel, channelSqlRow)
+	select{
+	case getRow := <-channelSqlRow:
+		return getRow, nil
+	case <-TimeOutInMilis(500):
+		return nil, rtoErrMsg
 	}
 }
 
-func ExecuteChanelSqlResult(sequel string) (int, string) {
-	go ExecSQL(sequel, ChanelSqlResult)
-	getResult := <-ChanelSqlResult
-	err := getResult.Error
-	if err != nil{
-		status, message := ErrorMessageDB(err.Error())
-		return status, message
-	}else{
-		sqlResult := getResult.SQLResult
-		affectedRow, _ := sqlResult.RowsAffected()		
-		switch{
-		case affectedRow < int64(1):
-			return 422, "data not afefcted"
-		default:
-			return 200, "success"
-		} 
+func ExecuteChannelSqlRows(sequel string) (*sql.Rows, error) {
+	chanSqlRows := make(chan QuerySQLType)
+	go QuerySQL(sequel, chanSqlRows)
+	
+	select{
+	case getRows := <-chanSqlRows:
+		return getRows.SQLRows, getRows.Error
+	case <-TimeOutInMilis(500):
+		return nil, rtoErrMsg
+	}
+}
+
+func ExecuteInsertSqlResult(sequel string) (int, string, int64) {
+	channelSqlResult := make(chan ExecSQLType)
+	go ExecSQL(sequel, channelSqlResult)
+	select{
+	case getResult := <-channelSqlResult:
+		err := getResult.Error
+		if err != nil{
+			status, message := ErrorMessageDB(err.Error())
+			return status, message, 0
+		}else{
+			sqlResult := getResult.SQLResult
+			affectedRow, _ := sqlResult.RowsAffected()
+			newId, _ := sqlResult.LastInsertId()
+			
+			switch{
+			case affectedRow < int64(1):
+				return 422, "data not efefcted", 0
+			default:
+				return 200, "success", newId
+			} 
+		}
+	case <-TimeOutInMilis(500):
+		return 500, rtoErrMsg.Error(),0
+	}
+}
+
+func ExecuteChannelSqlResult(sequel string) (int, string) {
+	channelSqlResult := make(chan ExecSQLType)
+	go ExecSQL(sequel, channelSqlResult)
+	select{
+	case getResult := <-channelSqlResult:
+		err := getResult.Error
+		if err != nil{
+			status, message := ErrorMessageDB(err.Error())
+			return status, message
+		}else{
+			sqlResult := getResult.SQLResult
+			affectedRow, _ := sqlResult.RowsAffected()		
+			switch{
+			case affectedRow < int64(1):
+				return 422, "data not afefcted"
+			default:
+				return 200, "success"
+			} 
+		}
+	case <-TimeOutInMilis(500):
+		return 500, rtoErrMsg.Error()
 	}
 }
 
 func ExecuteUpdateSqlResult(sequel string) (int, string){
-	status, _ := ExecuteChanelSqlResult(sequel)
+	status, _ := ExecuteChannelSqlResult(sequel)
 	if status == 404 {
 		return status, "data not updated"
 	}else{
@@ -102,8 +132,7 @@ func CreateFile(pathFile string) (output *os.File, err error) {
 	return
 }
 
-func ExecuteCopyFile(out *os.File, file multipart.File) chan CopyFileType {
+func ExecuteCopyFile(out *os.File, file multipart.File, channelCopyFile chan CopyFileType){
 	copied, err := io.Copy(out, file)
-	ChanelCopyFile <- CopyFileType{copied, err}
-	return ChanelCopyFile
+	channelCopyFile <- CopyFileType{copied, err}
 }

@@ -25,12 +25,19 @@ func GetTokenHeader(authHeader string) (int, string, string, int) {
 	mobilePhone := ""
 	userId := 0
 	sequel := fmt.Sprintf("select user_id, mobile_phone from users where token = '%s'", token)
-	err := ExecuteChanelSqlRow(sequel).Scan(&userId, &mobilePhone)
-	status, message := CheckScanRowSQL(err)
-	if status != 200 {
-		return status, message, "", userId
-	} else {
-		return 200, "success", mobilePhone, userId
+	
+	sqlRow, err := ExecuteChannelSqlRow(sequel)
+	switch{
+	case err!= nil:
+		return 508, err.Error(), "", userId
+	default:
+		errSqlRow := sqlRow.Scan(&userId, &mobilePhone)
+		status, message := CheckScanRowSQL(errSqlRow)
+		if status != 200 {
+			return status, message, "", userId
+		} else {
+			return 200, "success", mobilePhone, userId
+		}
 	}
 }
 
