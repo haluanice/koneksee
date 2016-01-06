@@ -10,21 +10,25 @@ import (
 var database = databaseFire()
 
 func databaseFire() *sql.DB {
-	database, _ := sql.Open("mysql", "root:z@/koneksee")
+	database, _ := sql.Open("mysql", "root:@/koneksee")
 	return database
 }
 
-func ExecSQL(sql string, c chan ExecSQLType) {
+func ExecSQL(sql string, chanel chan ExecSQLType) chan ExecSQLType {
 	exec, err := database.Exec(sql)
-	c <- ExecSQLType{exec, err}
+	chanel <- ExecSQLType{exec, err}
+	return chanel
+
 }
 
-func QuerySQL(sql string, c chan QuerySQLType) {
+func QuerySQL(sql string, chanel chan QuerySQLType) chan QuerySQLType {
 	query, err := database.Query(sql)
-	c <- QuerySQLType{query, err}
+	chanel <- QuerySQLType{query, err}
+	return chanel
 }
 
-func QueryRowSQL(sql string, c chan *sql.Row) {
+func QueryRowSQL(sql string, chanel chan *sql.Row) chan *sql.Row {
 	query := database.QueryRow(sql)
-	c <- query
+	chanel <- query
+	return chanel
 }

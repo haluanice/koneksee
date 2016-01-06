@@ -8,6 +8,16 @@ type User struct {
 	ProfilePicture string `json:"profile_picture"`
 }
 
+type UserUpdateType struct{
+	UserName string `json:"user_name"`
+	MobilePhone string `json:"mobile_phone"`
+}
+
+type UserProfilePictureType struct {
+	MobilePhone string `json:"mobile_phone"`
+	ProfilePicture string `json:"profile_picture"`
+}
+
 type UserTokenJson struct {
 	MobilePhone string `json:"mobile_phone"`
 }
@@ -23,4 +33,8 @@ type UserMobilePhone struct {
 
 type UpdateUserName struct {
 	UserName string `json:"user_name"`
+}
+
+type ActionToFriend struct {
+	MobilePhone string `json:"mobile_phone"`
 }

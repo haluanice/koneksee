@@ -18,19 +18,19 @@ func SetHeaderParameter(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 }
 
-func GetTokenHeader(r *http.Request) (int, string, string) {
-	authHeader := r.Header.Get("Authorization")
+func GetTokenHeader(authHeader string) (int, string, string, int) {
 	splitToken := strings.Split(authHeader, "Asolole ")
 	token := splitToken[len(splitToken)-1]
 
 	mobilePhone := ""
-	sequel := fmt.Sprintf("select mobile_phone from users where token = '%s'", token)
-	err := ExecuteChanelSqlRow(sequel).Scan(&mobilePhone)
+	userId := 0
+	sequel := fmt.Sprintf("select user_id, mobile_phone from users where token = '%s'", token)
+	err := ExecuteChanelSqlRow(sequel).Scan(&userId, &mobilePhone)
 	status, message := CheckScanRowSQL(err)
 	if status != 200 {
-		return status, message, ""
+		return status, message, "", userId
 	} else {
-		return 200, "", mobilePhone
+		return 200, "success", mobilePhone, userId
 	}
 }
 

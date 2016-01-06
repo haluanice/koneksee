@@ -12,7 +12,7 @@ import (
 var ChanelSqlRows = make(chan QuerySQLType)
 var ChanelSqlRow = make(chan *sql.Row)
 var ChanelSqlResult = make(chan ExecSQLType)
-var ChannelCopyFile = make(chan CopyFileType)
+var ChanelCopyFile = make(chan CopyFileType)
 
 type ExecSQLType struct {
 	SQLResult sql.Result
@@ -41,10 +41,53 @@ func ExecuteChanelSqlRows(sequel string) (*sql.Rows, error) {
 	return getRows.SQLRows, getRows.Error
 }
 
-func ExecuteChanelSqlResult(sequel string) (sql.Result, error) {
+func ExecuteInsertSqlResult(sequel string) (int, string, int64) {
 	go ExecSQL(sequel, ChanelSqlResult)
 	getResult := <-ChanelSqlResult
-	return getResult.SQLResult, getResult.Error
+	err := getResult.Error
+	if err != nil{
+		status, message := ErrorMessageDB(err.Error())
+		return status, message, 0
+	}else{
+		sqlResult := getResult.SQLResult
+		affectedRow, _ := sqlResult.RowsAffected()
+		newId, _ := sqlResult.LastInsertId()
+		
+		switch{
+		case affectedRow < int64(1):
+			return 422, "data not efefcted", 0
+		default:
+			return 200, "success", newId
+		} 
+	}
+}
+
+func ExecuteChanelSqlResult(sequel string) (int, string) {
+	go ExecSQL(sequel, ChanelSqlResult)
+	getResult := <-ChanelSqlResult
+	err := getResult.Error
+	if err != nil{
+		status, message := ErrorMessageDB(err.Error())
+		return status, message
+	}else{
+		sqlResult := getResult.SQLResult
+		affectedRow, _ := sqlResult.RowsAffected()		
+		switch{
+		case affectedRow < int64(1):
+			return 422, "data not afefcted"
+		default:
+			return 200, "success"
+		} 
+	}
+}
+
+func ExecuteUpdateSqlResult(sequel string) (int, string){
+	status, _ := ExecuteChanelSqlResult(sequel)
+	if status == 404 {
+		return status, "data not updated"
+	}else{
+		return status, "data updated"
+	}
 }
 
 func GenerateNewPath(path string, fileType string) (pathFile string, nameFile string, err error) {
@@ -59,7 +102,8 @@ func CreateFile(pathFile string) (output *os.File, err error) {
 	return
 }
 
-func ExecuteCopyFile(out *os.File, file multipart.File) {
+func ExecuteCopyFile(out *os.File, file multipart.File) chan CopyFileType {
 	copied, err := io.Copy(out, file)
-	ChannelCopyFile <- CopyFileType{copied, err}
+	ChanelCopyFile <- CopyFileType{copied, err}
+	return ChanelCopyFile
 }
