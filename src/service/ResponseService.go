@@ -3,11 +3,19 @@ package service
 
 import (
 	"database/sql"
+	"os"
 	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 )
 
+func AllocateNewPath(staticPath string) (string, error) {
+	return os.Getwd()
+}
+func GetFileType(fileName string) string {
+	fileTypeArr := strings.Split(fileName, ".")
+	return fileTypeArr[len(fileTypeArr)-1]
+}
 func ErrorMessageDB(errorMessage string) (int, string) {
 	messageArr := strings.Split(errorMessage, ": ")
 	message := messageArr[len(messageArr)-1]
