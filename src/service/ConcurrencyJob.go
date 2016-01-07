@@ -12,9 +12,11 @@ import (
 	"time"
 )
 
-var MutexVar sync.Mutex
-var GlobalTimeOutDB = time.Duration(500)
-var GlobalTimeOutIO = time.Duration(1000)
+var (
+	MutexVar        sync.Mutex
+	GlobalTimeOutDB = time.Duration(500)
+	GlobalTimeOutIO = time.Duration(1000)
+)
 
 func TimeOutInMilis(duration time.Duration) <-chan time.Time {
 	return time.After(duration * time.Millisecond)

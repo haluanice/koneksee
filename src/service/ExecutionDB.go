@@ -10,7 +10,7 @@ import (
 var database = databaseFire()
 
 func databaseFire() *sql.DB {
-	database, _ := sql.Open("mysql", "root:z@/koneksee")
+	database, _ := sql.Open("mysql", "root:@/koneksee")
 	return database
 }
 

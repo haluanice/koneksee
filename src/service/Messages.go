@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"responses"
@@ -10,8 +9,10 @@ import (
 	"sync/atomic"
 )
 
-var globalExecutionSuccessMessage atomic.Value
-var globalExecutionErrorMessage atomic.Value
+var (
+	globalExecutionSuccessMessage atomic.Value
+	globalExecutionErrorMessage   atomic.Value
+)
 
 func SetHeaderParameter(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
@@ -25,18 +26,18 @@ func GetTokenHeader(authHeader string) (int, string, string, int) {
 	mobilePhone := ""
 	userId := 0
 	sequel := fmt.Sprintf("select user_id, mobile_phone from users where token = '%s'", token)
-	
+
 	sqlRow, err := ExecuteChannelSqlRow(sequel)
-	switch{
-	case err!= nil:
+	switch {
+	case err != nil:
 		return 508, err.Error(), "", userId
 	default:
 		errSqlRow := sqlRow.Scan(&userId, &mobilePhone)
-		status, message := CheckScanRowSQL(errSqlRow)
+		status, _ := CheckScanRowSQL(errSqlRow)
 		if status != 200 {
-			return status, message, "", userId
+			return 401, "unauthorized", "", userId
 		} else {
-			return 200, "success", mobilePhone, userId
+			return http.StatusOK, "success", mobilePhone, userId
 		}
 	}
 }
@@ -45,18 +46,15 @@ func StringtoInt(integer string) int {
 	newInteger, _ := strconv.ParseInt(integer, 10, 0)
 	return int(newInteger)
 }
-
-func OutputError(status int, message string) string {
+func GetErrorMessageType(status int, message string) responses.ErrorMessage {
 	globalExecutionErrorMessage.Store(responses.ErrorMessage{status, message})
-	dataErrorMessage := globalExecutionErrorMessage.Load().(responses.ErrorMessage)
-	output, _ := json.Marshal(dataErrorMessage)
-	return string(output)
+	return globalExecutionErrorMessage.Load().(responses.ErrorMessage)
 }
 
-func OutputSuccess(status int, message string, v interface{}) string {
-	output, _ := json.Marshal(responses.GeneralMsg{status, message, v})
-	return string(output)
+func GetGeneralMsgType(status int, message string, v interface{}) responses.GeneralMsg {
+	return responses.GeneralMsg{status, message, v}
 }
+
 func DBErrorParser(err string) (string, int64) {
 	Parts := strings.Split(err, ":")
 	errorMessage := Parts[1]

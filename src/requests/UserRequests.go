@@ -18,17 +18,17 @@ type UserProfilePictureType struct {
 	ProfilePicture string `json:"profile_picture"`
 }
 
-type UserTokenJson struct {
+type MobilePhoneJson struct {
 	MobilePhone string `json:"mobile_phone"`
 }
 
 type UserToken struct {
-	UserID int    `json:"user_id"`
+	MobilePhone string    `json:"mobile_phone"`
 	Token  string `json:"token"`
 }
 
-type UserMobilePhone struct {
-	MobilePhone string `json:"mobile_phone"`
+type ContactList struct{
+	Contact []MobilePhoneJson `json:"data"`
 }
 
 type UpdateUserName struct {
