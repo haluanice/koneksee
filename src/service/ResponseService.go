@@ -9,8 +9,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-func AllocateNewPath(staticPath string) (string, error) {
-	return os.Getwd()
+func AllocateNewPath(staticPath string) string {
+	pwd, _ := os.Getwd()
+
+	return pwd + staticPath
 }
 func GetFileType(fileName string) string {
 	fileTypeArr := strings.Split(fileName, ".")
@@ -20,7 +22,7 @@ func ErrorMessageDB(errorMessage string) (int, string) {
 	messageArr := strings.Split(errorMessage, ": ")
 	message := messageArr[len(messageArr)-1]
 	status := 500
-	isDuplicate := messageArr[0] == "Error 1062"
+	isDuplicate := (messageArr[0] == "Error 1062")
 	if isDuplicate {
 		status = 409
 	}

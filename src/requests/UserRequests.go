@@ -8,13 +8,13 @@ type User struct {
 	ProfilePicture string `json:"profile_picture"`
 }
 
-type UserUpdateType struct{
-	UserName string `json:"user_name"`
+type UserUpdateType struct {
+	UserName    string `json:"user_name"`
 	MobilePhone string `json:"mobile_phone"`
 }
 
 type UserProfilePictureType struct {
-	MobilePhone string `json:"mobile_phone"`
+	MobilePhone    string `json:"mobile_phone"`
 	ProfilePicture string `json:"profile_picture"`
 }
 
@@ -23,11 +23,11 @@ type MobilePhoneJson struct {
 }
 
 type UserToken struct {
-	MobilePhone string    `json:"mobile_phone"`
-	Token  string `json:"token"`
+	MobilePhone string `json:"mobile_phone"`
+	Token       string `json:"token"`
 }
 
-type ContactList struct{
+type ContactList struct {
 	Contact []MobilePhoneJson `json:"data"`
 }
 

@@ -3,41 +3,49 @@ package service
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"responses"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
 	globalExecutionSuccessMessage atomic.Value
 	globalExecutionErrorMessage   atomic.Value
+	CloudinaryAuth = "cloudinary://829347955498358:M1YyDwa7BSdNHS4qqeUQW3l6S4A@dxclwskoq"
 )
 
-func SetHeaderParameter(w http.ResponseWriter) {
+func GetRootPath() string {
+	rootPath, _ := os.Getwd()
+	return rootPath
+}
+func SetHeaderParameterJson(w http.ResponseWriter) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
 }
 
-func GetTokenHeader(authHeader string) (int, string, string, int) {
-	splitToken := strings.Split(authHeader, "Asolole ")
+func GetTokenHeader(authHeader string) (status int, message string, mobilePhone string) {
+	splitToken := strings.Split(authHeader, "Bearer ")
 	token := splitToken[len(splitToken)-1]
 
-	mobilePhone := ""
-	userId := 0
-	sequel := fmt.Sprintf("select user_id, mobile_phone from users where token = '%s'", token)
+	sequel := fmt.Sprintf("select mobile_phone from users where token = '%s'", token)
 
 	sqlRow, err := ExecuteChannelSqlRow(sequel)
 	switch {
 	case err != nil:
-		return 508, err.Error(), "", userId
+		return 508, err.Error(), ""
 	default:
-		errSqlRow := sqlRow.Scan(&userId, &mobilePhone)
-		status, _ := CheckScanRowSQL(errSqlRow)
-		if status != 200 {
-			return 401, "unauthorized", "", userId
+		_ = sqlRow.Scan(&mobilePhone)
+		byetMobilePhone := []byte(mobilePhone)
+		byteToken := []byte(token)
+		authorized := (bcrypt.CompareHashAndPassword(byteToken, byetMobilePhone) == nil)
+		if authorized {
+			return http.StatusOK, "success", mobilePhone
 		} else {
-			return http.StatusOK, "success", mobilePhone, userId
+			return http.StatusUnauthorized, "unauthorized", ""
 		}
 	}
 }

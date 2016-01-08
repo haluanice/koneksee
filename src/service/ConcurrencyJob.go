@@ -14,8 +14,8 @@ import (
 
 var (
 	MutexVar        sync.Mutex
-	GlobalTimeOutDB = time.Duration(500)
-	GlobalTimeOutIO = time.Duration(1000)
+	GlobalTimeOutDB = time.Duration(5000)
+	GlobalTimeOutIO = time.Duration(13000)
 )
 
 func TimeOutInMilis(duration time.Duration) <-chan time.Time {

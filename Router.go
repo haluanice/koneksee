@@ -3,12 +3,13 @@ package main
 
 import (
 	"net/http"
-	"os"
 
 	"controller"
 	"fmt"
 	"responses"
 	"service"
+	"strconv"
+	"strings"
 
 	"github.com/drone/routes"
 )
@@ -16,43 +17,57 @@ import (
 func Routes() {
 	mux := routes.New()
 
-	mux.Post("/api/v1/users", controller.CreateUser)
-	mux.Post("/api/v1/users/token", controller.GenerateNewToken)
-
-	mux.Filter(FilterToken)
-	mux.Post("/api/v1/users/index", controller.GetUsers)
-
-	mux.Put("/api/v1/users", controller.UpdateUser)
-	mux.Get("/api/v1/users/:id", controller.GetUser)
-	mux.Del("/api/v1/users", controller.DeleteUser)
-	mux.Put("/api/v1/users/mobile_phone", controller.UpdatePhoneNumber)
-
-	mux.Put("/api/v1/users/file", controller.UploadFile)
-
-	mux.Post("/api/v1/users/action/block", controller.BlockFriend)
-	mux.Post("/api/v1/users/action/hide", controller.HideFriend)
-	mux.Del("/api/v1/users/action/block", controller.UnBlockFriend)
-	mux.Del("/api/v1/users/action/hide", controller.UnHideFriend)
-
-	pwd, _ := os.Getwd()
-	mux.Static("/static", pwd)
-
+	GroupUnaUthorize(mux)
+	GroupAuthorize(mux)
 	http.Handle("/", mux)
 	http.ListenAndServe(":8080", nil)
 }
 
+func GroupUnaUthorize(mux *routes.RouteMux) {
+	mux.Post("/api/v1/users", controller.CreateUser)
+	mux.Post("/api/v1/users/token", controller.GenerateNewToken)
+	mux.Static("/static", service.GetRootPath())
+}
+func GroupAuthorize(mux *routes.RouteMux) {
+	mux.Filter(FilterToken)
+	mux.Post("/api/v1/users/index", controller.GetUsers)
+	mux.Get("/api/v1/users/:id/blocked", controller.GetUsersBlocked)
+
+	mux.Put("/api/v1/users/:id/user_name", controller.UpdateUserName)
+	mux.Get("/api/v1/users/:id", controller.GetUser)
+	mux.Del("/api/v1/users/:id", controller.DeleteUser)
+	mux.Put("/api/v1/users/:id/mobile_phone", controller.UpdatePhoneNumber)
+
+	mux.Put("/api/v1/users/:id/avatar", controller.UploadFile)
+
+	mux.Post("/api/v1/users/:id/block", controller.BlockFriend)
+	mux.Post("/api/v1/users/:id/hide", controller.HideFriend)
+	mux.Del("/api/v1/users/:id/block", controller.UnBlockFriend)
+	mux.Del("/api/v1/users/:id/hide", controller.UnHideFriend)
+}
+
 func FilterToken(w http.ResponseWriter, r *http.Request) {
 	method := r.Method
-	methodAllowed := method == "POST"
-
 	url := fmt.Sprintf("%s", r.URL)
+
+	allowedMethodUnAuth := (method == "POST")
 	listExceptionURL := (url == "/api/v1/users" || url == "/api/v1/users/token")
-	service.SetHeaderParameter(w)
+	serveStaticPath := (strings.Contains(url, "/static/") && method == "GET")
+
+	if !serveStaticPath {
+		service.SetHeaderParameterJson(w)
+	}
+
 	switch {
-	case methodAllowed && listExceptionURL:
+	case serveStaticPath:
 		return
+	case listExceptionURL && allowedMethodUnAuth:
+		return
+	//TO DO: case create user auth header for api_key & secret_api	
 	default:
-		status, message, _, _ := service.GetTokenHeader(r.Header.Get("Authorization"))
+		status, message, mobilePhone := service.GetTokenHeader(r.Header.Get("Authorization"))
+		r.Header.Set("mobile_phone", mobilePhone)
+		r.Header.Set("status_filter", strconv.Itoa(status))
 		if status != 200 {
 			w.WriteHeader(status)
 			routes.ServeJson(w, responses.ErrorMessage{status, message})
