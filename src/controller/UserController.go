@@ -2,13 +2,13 @@
 package controller
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"sync/atomic"
-	"bytes"
-	"io/ioutil"
 
 	"encoding/json"
 	"net/http"
@@ -18,10 +18,9 @@ import (
 	"strconv"
 
 	//"github.com/gotsunami/go-cloudinary"
-	"github.com/kyokomi/cloudinary"
 	"github.com/drone/routes"
+	"github.com/kyokomi/cloudinary"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -45,7 +44,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	resultSelectUserSQL(w, sequel)
 }
 
-func GetUsersBlocked(w http.ResponseWriter, r *http.Request){
+func GetUsersBlocked(w http.ResponseWriter, r *http.Request) {
 	mobilePhone := r.Header.Get("mobile_phone")
 	condition := fmt.Sprintf("mobile_phone IN "+
 		" (SELECT friend_mobile_phone FROM users u JOIN friends_relationship fr "+
@@ -130,8 +129,8 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	NewUser := atomicUser(newUserJson(r.Body))
 	mobileBytes := []byte(NewUser.MobilePhone)
 	hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
-	
-	if isErrNotNil(w, err){
+
+	if isErrNotNil(w, err) {
 		return
 	}
 
@@ -139,36 +138,36 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	status, message, newId := service.ExecuteInsertSqlResult(SQL)
 	userCreated := responses.UserCreated{int(newId), NewUser.UserName, NewUser.MobilePhone, fmt.Sprintf("%s", hashedPassword)}
 	switch {
-	case status == 409:		
+	case status == 409:
 		// 1. Update user_name and token in users
 		field := fmt.Sprintf("user_name='%s', token = '%s'", NewUser.UserName, hashedPassword)
 		condition := fmt.Sprintf("mobile_phone = '%s'", NewUser.MobilePhone)
 		sequel := service.UpdateQuery("users", field, condition)
 		statusUpdate, messageUpdate := updateUserExecutor(sequel)
-		if isStatusNotOK(w, statusUpdate, messageUpdate){
+		if isStatusNotOK(w, statusUpdate, messageUpdate) {
 			return
 		}
 
 		// 2. Get user_id
 		conditionSelect := fmt.Sprintf("mobile_phone = %s", NewUser.MobilePhone)
 		sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
-		sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)		
-		if isErrNotNil(w, err){
+		sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
+		if isErrNotNil(w, err) {
 			return
 		}
 
 		// 3. Check if result exists
 		errSqlRow := sqlRow.Scan(&userCreated.UserId)
-		statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)		
-		if isStatusNotOK(w, statusRow, messageRow){
+		statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
+		if isStatusNotOK(w, statusRow, messageRow) {
 			return
 		}
 
-		// 4. Return existing mobile_phone with given user_name and new token 
+		// 4. Return existing mobile_phone with given user_name and new token
 		w.WriteHeader(statusRow)
 		routes.ServeJson(w, service.GetGeneralMsgType(statusRow, messageRow, userCreated))
 	default:
-		printResult(w, status, message, userCreated)		
+		printResult(w, status, message, userCreated)
 	}
 }
 
@@ -204,7 +203,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		printUploadError(w, err)
 		return
 	}
-	// 2. Read file 
+	// 2. Read file
 	fileType := service.GetFileType(header.Filename)
 
 	if !allowedImageType(fileType) {
@@ -250,18 +249,17 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		newFilePath := fmt.Sprintf("%s%s", staticPath, nameFile)
 
 		pwd, _ := os.Getwd()
-		tempFile := pwd+newFilePath
+		tempFile := pwd + newFilePath
 		out, err := ioutil.ReadFile(tempFile)
 		if err != nil {
 			printUploadError(w, err)
 			return
 		}
-		
+
 		//6. Upload Copied file to cloudinary
-		ctx := context.Background()
-		ctxCloud := cloudinary.NewContext(ctx, service.CloudinaryAuth)
+
 		readFileCopied := bytes.NewReader(out)
-		err = cloudinary.UploadStaticImage(ctxCloud, nameFile, readFileCopied)
+		err = cloudinary.UploadStaticImage(service.CtxCloudinary, nameFile, readFileCopied)
 		if err != nil {
 			w.WriteHeader(500)
 			routes.ServeJson(w, service.GetErrorMessageType(500, "internal server error with cloudinary"))
@@ -269,7 +267,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 7. Update cloudinary path to profile user
-		cloudinaryFile := cloudinary.ResourceURL(ctxCloud, nameFile)
+		cloudinaryFile := cloudinary.ResourceURL(service.CtxCloudinary, nameFile)
 		field := fmt.Sprintf("profile_picture = '%s'", cloudinaryFile)
 		condition := fmt.Sprintf("mobile_phone = '%s'", mobilePhone)
 		sequel := service.UpdateQuery("users", field, condition)
@@ -321,7 +319,7 @@ func UnHideFriend(w http.ResponseWriter, r *http.Request) {
 
 //User Controller Private Function
 
-func isErrNotNil(w http.ResponseWriter , err error) bool{
+func isErrNotNil(w http.ResponseWriter, err error) bool {
 	if err != nil {
 		w.WriteHeader(500)
 		routes.ServeJson(w, service.GetErrorMessageType(500, err.Error()))
@@ -330,7 +328,7 @@ func isErrNotNil(w http.ResponseWriter , err error) bool{
 	return false
 }
 
-func isStatusNotOK(w http.ResponseWriter, status int, message string) bool{
+func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
 	if status != 200 {
 		w.WriteHeader(status)
 		routes.ServeJson(w, service.GetErrorMessageType(status, message))
@@ -347,11 +345,11 @@ func printResult(w http.ResponseWriter, status int, message string, valueType in
 	}
 }
 
-func selectUserSQL(condition string) string{
+func selectUserSQL(condition string) string {
 	return service.SelectQuery("user_id, user_name, mobile_phone, profile_picture", "users", condition)
 }
 
-func resultSelectUserSQL(w http.ResponseWriter, sequel string){
+func resultSelectUserSQL(w http.ResponseWriter, sequel string) {
 	rows, err := service.ExecuteChannelSqlRows(sequel)
 	if err != nil {
 		w.WriteHeader(500)

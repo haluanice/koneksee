@@ -16,7 +16,6 @@ import (
 
 func Routes() {
 	mux := routes.New()
-
 	GroupUnaUthorize(mux)
 	GroupAuthorize(mux)
 	http.Handle("/", mux)
@@ -63,7 +62,7 @@ func FilterToken(w http.ResponseWriter, r *http.Request) {
 		return
 	case listExceptionURL && allowedMethodUnAuth:
 		return
-	//TO DO: case create user auth header for api_key & secret_api	
+	//TO DO: case create user auth header for api_key & secret_api
 	default:
 		status, message, mobilePhone := service.GetTokenHeader(r.Header.Get("Authorization"))
 		r.Header.Set("mobile_phone", mobilePhone)

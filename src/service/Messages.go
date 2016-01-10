@@ -15,7 +15,6 @@ import (
 var (
 	globalExecutionSuccessMessage atomic.Value
 	globalExecutionErrorMessage   atomic.Value
-	CloudinaryAuth = "cloudinary://829347955498358:M1YyDwa7BSdNHS4qqeUQW3l6S4A@dxclwskoq"
 )
 
 func GetRootPath() string {
