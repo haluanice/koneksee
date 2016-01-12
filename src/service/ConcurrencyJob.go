@@ -45,7 +45,6 @@ func MutexTime() {
 }
 
 func ExecuteChannelSqlRow(sequel string) (*sql.Row, error) {
-	fmt.Println(sequel)
 	channelSqlRow := make(chan *sql.Row)
 	go QueryRowSQL(sequel, channelSqlRow)
 	select {

@@ -375,8 +375,8 @@ func mapUsers(rows *sql.Rows) chan responses.GeneralArrMsg {
 			users.Datas = append(users.Datas, resChanUser)
 		}
 		close(chanUser)
+		chanUsers <- users
 	}()
-	chanUsers <- users
 	return chanUsers
 }
 
