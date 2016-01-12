@@ -114,6 +114,12 @@ func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
 	NewUser := atomicUser(newUserJson(r.Body))
+	if NewUser.PhoneNumber == "" {
+		w.WriteHeader(422)
+		routes.ServeJson(w, service.GetErrorMessageType(422, "phone_number is empty"))
+		return
+	}
+
 	mobileBytes := []byte(NewUser.PhoneNumber)
 	hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
 
