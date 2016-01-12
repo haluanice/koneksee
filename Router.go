@@ -6,41 +6,51 @@ import (
 
 	"controller"
 	"fmt"
+	"github.com/drone/routes"
+	"github.com/go-martini/martini"
 	"responses"
 	"service"
 	"strconv"
 	"strings"
-
-	"github.com/drone/routes"
 )
 
-func Routes() {
-	mux := routes.New()
-	GroupUnaUthorize(mux)
-	GroupAuthorize(mux)
+type Server *martini.ClassicMartini
+
+func Run() {
+	mux := martini.Classic()
+	UnAuthorizedGroup(mux)
+	mux.Use(FilterToken)
+	AutHorizedGroup(mux)
 	http.Handle("/", mux)
 	http.ListenAndServe(":8080", nil)
+	// mux.Run()
+}
+func Routes() *martini.ClassicMartini {
+	mux := Server(martini.Classic())
+	UnAuthorizedGroup(mux)
+	AutHorizedGroup(mux)
+	return mux
 }
 
-func GroupUnaUthorize(mux *routes.RouteMux) {
+func UnAuthorizedGroup(mux Server) {
 	mux.Post("/api/v1/users", controller.CreateUser)
 	mux.Post("/api/v1/users/token", controller.GenerateNewToken)
-	mux.Static("/static", service.GetRootPath())
+	//mux.Static("/static", service.GetRootPath())
 }
-func GroupAuthorize(mux *routes.RouteMux) {
-	mux.Filter(FilterToken)
+
+func AutHorizedGroup(mux Server) {
 	mux.Post("/api/v1/users/index", controller.GetUsers)
 	mux.Get("/api/v1/users/:id/blocked", controller.GetUsersBlocked)
 
 	mux.Put("/api/v1/users/:id/user_name", controller.UpdateUserName)
 	mux.Get("/api/v1/users/:id", controller.GetUser)
-	mux.Del("/api/v1/users/:id", controller.DeleteUser)
+	mux.Delete("/api/v1/users/:id", controller.DeleteUser)
 	mux.Put("/api/v1/users/:id/mobile_phone", controller.UpdatePhoneNumber)
 
 	mux.Put("/api/v1/users/:id/avatar", controller.UploadFile)
 
 	mux.Post("/api/v1/users/:id/block", controller.BlockFriend)
-	mux.Del("/api/v1/users/:id/block", controller.UnBlockFriend)
+	mux.Delete("/api/v1/users/:id/block", controller.UnBlockFriend)
 }
 
 func FilterToken(w http.ResponseWriter, r *http.Request) {
