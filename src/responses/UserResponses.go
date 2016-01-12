@@ -19,6 +19,6 @@ type GeneralArrMsg struct {
 type UserCreated struct {
 	UserId      int    `json:"user_id"`
 	UserName    string `json:"user_name"`
-	MobilePhone string `json:"mobile_phone"`
+	PhoneNumber string `json:"phone_number"`
 	Token       string `json:"token"`
 }

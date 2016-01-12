@@ -2,7 +2,6 @@
 package controller
 
 import (
-	"bytes"
 	"database/sql"
 	"fmt"
 	"io"
@@ -17,9 +16,7 @@ import (
 	"service"
 	"strconv"
 
-	//"github.com/gotsunami/go-cloudinary"
 	"github.com/drone/routes"
-	"github.com/kyokomi/cloudinary"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -29,7 +26,7 @@ var (
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
+	phoneNumber := r.Header.Get("mobile_phone")
 	contactListJson := requests.ContactList{}
 	service.DecodeJson(&contactListJson, r.Body)
 
@@ -37,18 +34,18 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	contact := <-chanContactString
 	close(chanContactString)
 
-	condition := fmt.Sprintf("mobile_phone IN (%s) AND mobile_phone NOT IN "+
-		" (SELECT friend_mobile_phone FROM users u JOIN friends_relationship fr "+
-		" ON u.`mobile_phone` = fr.`user_mobile_phone` WHERE u.`mobile_phone` = '%s' )", contact, mobilePhone)
+	condition := fmt.Sprintf("phone_number IN (%s) AND phone_number NOT IN "+
+		" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
+		" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", contact, phoneNumber)
 	sequel := selectUserSQL(condition)
 	resultSelectUserSQL(w, sequel)
 }
 
 func GetUsersBlocked(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
-	condition := fmt.Sprintf("mobile_phone IN "+
-		" (SELECT friend_mobile_phone FROM users u JOIN friends_relationship fr "+
-		" ON u.`mobile_phone` = fr.`user_mobile_phone` WHERE u.`mobile_phone` = '%s' )", mobilePhone)
+	phoneNumber := r.Header.Get("mobile_phone")
+	condition := fmt.Sprintf("phone_number IN "+
+		" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
+		" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", phoneNumber)
 	sequel := selectUserSQL(condition)
 	resultSelectUserSQL(w, sequel)
 }
@@ -59,100 +56,88 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	user := atomicUser(requests.User{})
 
 	condition := fmt.Sprintf("user_id = %s", id)
-	sequel := service.SelectQuery("user_id, user_name, mobile_phone, profile_picture", "users", condition)
+	sequel := service.SelectQuery("user_id, user_name, phone_number, profile_picture", "users", condition)
 	sqlRow, err := service.ExecuteChannelSqlRow(sequel)
-	switch {
-	case err != nil:
-		w.WriteHeader(508)
-		routes.ServeJson(w, service.GetErrorMessageType(508, err.Error()))
-	default:
-		errSqlRow := sqlRow.Scan(&user.UserId, &user.UserName, &user.MobilePhone, &user.ProfilePicture)
-		statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
-		w.WriteHeader(statusRow)
-		printResult(w, statusRow, messageRow, user)
+	if isErrNotNil(w, 508, err) {
+		return
 	}
-
+	errSqlRow := sqlRow.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
+	statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
+	w.WriteHeader(statusRow)
+	printResult(w, statusRow, messageRow, user)
 }
 
 func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
 	user_id := 0
-	userTokenJson := requests.MobilePhoneJson{}
+	userTokenJson := requests.PhoneNumberJson{}
 	service.DecodeJson(&userTokenJson, r.Body)
 
-	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(userTokenJson.MobilePhone))
-	switch {
-	case err != nil:
-		w.WriteHeader(508)
-		routes.ServeJson(w, service.GetErrorMessageType(508, err.Error()))
-	default:
-		errSqlRow := sqlRow.Scan(&user_id)
-		status, message := service.CheckScanRowSQL(errSqlRow)
-		if status != 200 {
-			w.WriteHeader(status)
-			routes.ServeJson(w, service.GetErrorMessageType(status, message))
-		} else {
-			mobilePhone := userTokenJson.MobilePhone
-			resultHashed := hashedMobileNumber(mobilePhone)
-			statusInsertToken, messageInsertToken := insertTokenToUsersTable(resultHashed, mobilePhone)
-			w.WriteHeader(statusInsertToken)
-			if statusInsertToken != 200 {
-				routes.ServeJson(w, service.GetErrorMessageType(statusInsertToken, messageInsertToken))
-			} else {
-				userToken := requests.UserToken{mobilePhone, resultHashed}
-				routes.ServeJson(w, service.GetGeneralMsgType(statusInsertToken, messageInsertToken, userToken))
-			}
-		}
+	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(userTokenJson.PhoneNumber))
+	if isErrNotNil(w, 508, err) {
+		return
 	}
+	errSqlRow := sqlRow.Scan(&user_id)
+	status, message := service.CheckScanRowSQL(errSqlRow)
+	if isStatusNotOK(w, status, message) {
+		return
+	}
+	phoneNumber := userTokenJson.PhoneNumber
+	resultHashed := hashedMobileNumber(phoneNumber)
+	statusInsertToken, messageInsertToken := insertTokenToUsersTable(resultHashed, phoneNumber)
+	w.WriteHeader(statusInsertToken)
+	if isStatusNotOK(w, statusInsertToken, messageInsertToken) {
+		return
+	}
+	userToken := requests.UserToken{phoneNumber, resultHashed}
+	routes.ServeJson(w, service.GetGeneralMsgType(statusInsertToken, messageInsertToken, userToken))
 }
 
 func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
-	userTokenJson := requests.MobilePhoneJson{}
+	phoneNumber := r.Header.Get("phone_number")
+	userTokenJson := requests.PhoneNumberJson{}
 	service.DecodeJson(&userTokenJson, r.Body)
-	newMobilePhone := userTokenJson.MobilePhone
-	if mobilePhone == "" {
+	newphoneNumber := userTokenJson.PhoneNumber
+	if phoneNumber == "" {
 		routes.ServeJson(w, service.GetErrorMessageType(400, "data empty"))
 	} else {
-		resultHashed := hashedMobileNumber(mobilePhone)
-		field := fmt.Sprintf("mobile_phone = '%s', token = '%s'", newMobilePhone, resultHashed)
-		condition := fmt.Sprintf("mobile_phone = '%s'", mobilePhone)
-		sequel := service.UpdateQuery("users", field, condition)
-		statusResult, messageResult := service.ExecuteChannelSqlResult(sequel)
-		w.WriteHeader(statusResult)
-		userToken := requests.UserToken{newMobilePhone, resultHashed}
-		printResult(w, statusResult, messageResult, userToken)
+		resultHashed := hashedMobileNumber(phoneNumber)
+		field := fmt.Sprintf("phone_number = '%s', token = '%s'", newphoneNumber, resultHashed)
+		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+		w.WriteHeader(statusUpdate)
+		userToken := requests.UserToken{newphoneNumber, resultHashed}
+		printResult(w, statusUpdate, messageUpdate, userToken)
 	}
 
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
 	NewUser := atomicUser(newUserJson(r.Body))
-	mobileBytes := []byte(NewUser.MobilePhone)
+	mobileBytes := []byte(NewUser.PhoneNumber)
 	hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
 
-	if isErrNotNil(w, err) {
+	if isErrNotNil(w, 508, err) {
 		return
 	}
 
-	SQL := fmt.Sprintf("INSERT INTO users SET user_name='%s', mobile_phone='%s', token = '%s'", NewUser.UserName, NewUser.MobilePhone, hashedPassword)
+	SQL := fmt.Sprintf("INSERT INTO users SET user_name='%s', phone_number='%s', token = '%s'", NewUser.UserName, NewUser.PhoneNumber, hashedPassword)
 	status, message, newId := service.ExecuteInsertSqlResult(SQL)
-	userCreated := responses.UserCreated{int(newId), NewUser.UserName, NewUser.MobilePhone, fmt.Sprintf("%s", hashedPassword)}
+	userCreated := responses.UserCreated{int(newId), NewUser.UserName, NewUser.PhoneNumber, fmt.Sprintf("%s", hashedPassword)}
 	switch {
 	case status == 409:
 		// 1. Update user_name and token in users
 		field := fmt.Sprintf("user_name='%s', token = '%s'", NewUser.UserName, hashedPassword)
-		condition := fmt.Sprintf("mobile_phone = '%s'", NewUser.MobilePhone)
-		sequel := service.UpdateQuery("users", field, condition)
-		statusUpdate, messageUpdate := updateUserExecutor(sequel)
+		condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
 		if isStatusNotOK(w, statusUpdate, messageUpdate) {
 			return
 		}
 
 		// 2. Get user_id
-		conditionSelect := fmt.Sprintf("mobile_phone = %s", NewUser.MobilePhone)
+		conditionSelect := fmt.Sprintf("phone_number = %s", NewUser.PhoneNumber)
 		sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
 		sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
-		if isErrNotNil(w, err) {
+		if isErrNotNil(w, 508, err) {
 			return
 		}
 
@@ -172,30 +157,29 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func UpdateUserName(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
+	phoneNumber := r.Header.Get("phone_number")
 	updateUserName := requests.UpdateUserName{}
 	service.DecodeJson(&updateUserName, r.Body)
 	userName := updateUserName.UserName
 	table := "users"
 	field := fmt.Sprintf("user_name='%s'", userName)
-	condition := fmt.Sprintf("mobile_phone = '%s'", mobilePhone)
-	sequel := service.UpdateQuery(table, field, condition)
-	statusUpdate, messageUpdate := updateUserExecutor(sequel)
+	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+	statusUpdate, messageUpdate := service.UpdateQuery(table, field, condition)
 	w.WriteHeader(statusUpdate)
-	printResult(w, statusUpdate, messageUpdate, requests.UserUpdateType{userName, mobilePhone})
+	printResult(w, statusUpdate, messageUpdate, requests.UserUpdateType{userName, phoneNumber})
 }
 
 func DeleteUser(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
-	SQL := fmt.Sprintf("Delete FROM users WHERE mobile_phone = '%s'", mobilePhone)
+	phoneNumber := r.Header.Get("phone_number")
+	SQL := fmt.Sprintf("Delete FROM users WHERE phone_number = '%s'", phoneNumber)
 
 	statusResult, messageResult := service.ExecuteChannelSqlResult(SQL)
 	w.WriteHeader(statusResult)
-	printResult(w, statusResult, messageResult, requests.MobilePhoneJson{mobilePhone})
+	printResult(w, statusResult, messageResult, requests.PhoneNumberJson{phoneNumber})
 }
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
-	mobilePhone := r.Header.Get("mobile_phone")
+	phoneNumber := r.Header.Get("phone_number")
 	file, header, err := r.FormFile("file")
 
 	// 1. Get file from form-data
@@ -204,7 +188,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 2. Read file
-	fileType := service.GetFileType(header.Filename)
+	fileType := header.Header.Get("Content-Type")
 
 	if !allowedImageType(fileType) {
 		w.WriteHeader(http.StatusUnsupportedMediaType)
@@ -212,117 +196,78 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Allocate directory
-	staticPath := "/static/"
-	targetPath := service.AllocateNewPath(staticPath)
-
-	errFindOrCreateDir := findOrCreateDirectory(targetPath)
-	if errFindOrCreateDir != nil {
-		printUploadError(w, errFindOrCreateDir)
-		return
-	}
-	// 4. Generate new path
-	pathFile, nameFile, errNewPath := service.GenerateNewPath(targetPath, fileType)
+	// 3. Generate new filename
+	nameFile, errNewPath := service.GenerateNewPath()
 	if errNewPath != nil {
 		printUploadError(w, errNewPath)
 		return
 	}
-	// 5. Copy file into local disk
-	out, errCreateFile := service.CreateFile(pathFile)
-	if errCreateFile != nil {
-		printUploadError(w, errCreateFile)
+	// 4. Read multipart file
+
+	buff, errReadFile := ioutil.ReadAll(file)
+	if errReadFile != nil {
+		printUploadError(w, errReadFile)
+	}
+	//5. Upload to cloudinary
+	resChannelUpload := service.UploadImage(nameFile, buff)
+	cloudinaryInfo := <-resChannelUpload
+	close(resChannelUpload)
+	if cloudinaryInfo.Err != nil {
+		w.WriteHeader(500)
+		routes.ServeJson(w, service.GetErrorMessageType(500, "internal server error with cloudinary"))
 		return
 	}
 
-	chanCopyFile := make(chan service.CopyFileType)
-	go service.ExecuteCopyFile(out, file, chanCopyFile)
-	select {
-	case rcvChannelCopyFile := <-chanCopyFile:
-		out.Close()
-		file.Close()
-		errCopy := rcvChannelCopyFile.Err
-		if errCopy != nil {
-			printUploadError(w, err)
-			return
-		}
+	// 6. Update cloudinary path to profile user
+	cloudinaryPath := cloudinaryInfo.FilePath
+	field := fmt.Sprintf("profile_picture = '%s'", cloudinaryPath)
+	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+	statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+	w.WriteHeader(statusUpdate)
+	printResult(w, statusUpdate, messageUpdate, requests.UserProfilePictureType{phoneNumber, cloudinaryPath})
 
-		newFilePath := fmt.Sprintf("%s%s", staticPath, nameFile)
-
-		pwd, _ := os.Getwd()
-		tempFile := pwd + newFilePath
-		out, err := ioutil.ReadFile(tempFile)
-		if err != nil {
-			printUploadError(w, err)
-			return
-		}
-
-		//6. Upload Copied file to cloudinary
-
-		readFileCopied := bytes.NewReader(out)
-		err = cloudinary.UploadStaticImage(service.CtxCloudinary, nameFile, readFileCopied)
-		if err != nil {
-			w.WriteHeader(500)
-			routes.ServeJson(w, service.GetErrorMessageType(500, "internal server error with cloudinary"))
-			return
-		}
-
-		// 7. Update cloudinary path to profile user
-		cloudinaryFile := cloudinary.ResourceURL(service.CtxCloudinary, nameFile)
-		field := fmt.Sprintf("profile_picture = '%s'", cloudinaryFile)
-		condition := fmt.Sprintf("mobile_phone = '%s'", mobilePhone)
-		sequel := service.UpdateQuery("users", field, condition)
-		statusUpdate, messageUpdate := updateUserExecutor(sequel)
-		w.WriteHeader(statusUpdate)
-		printResult(w, statusUpdate, messageUpdate, requests.UserProfilePictureType{mobilePhone, cloudinaryFile})
-
-		// 8. Remove file from local disk
-		_ = os.Remove(tempFile)
-	case <-service.TimeOutInMilis(service.GlobalTimeOutIO):
-		close(chanCopyFile)
-		routes.ServeJson(w, service.GetErrorMessageType(408, "request timeout"))
-	}
 }
 
 func BlockFriend(w http.ResponseWriter, r *http.Request) {
 	block := 0
-	status, mobilePhone := getStatusMobilePhone(r)
+	status, phoneNumber := getStatusphoneNumber(r)
 
 	w.WriteHeader(status)
-	friendMobilePhone := decodeActionFriendMobilePhone(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(mobilePhone, friendMobilePhone, block)))
+	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
+	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(phoneNumber, friendphoneNumber, block)))
 }
 
 func HideFriend(w http.ResponseWriter, r *http.Request) {
 	hide := 1
-	status, mobilePhone := getStatusMobilePhone(r)
+	status, phoneNumber := getStatusphoneNumber(r)
 
 	w.WriteHeader(status)
-	friendMobilePhone := decodeActionFriendMobilePhone(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(mobilePhone, friendMobilePhone, hide)))
+	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
+	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(phoneNumber, friendphoneNumber, hide)))
 
 }
 
 func UnBlockFriend(w http.ResponseWriter, r *http.Request) {
 	block := 0
-	status, mobilePhone := getStatusMobilePhone(r)
+	status, phoneNumber := getStatusphoneNumber(r)
 	w.WriteHeader(status)
-	friendMobilePhone := decodeActionFriendMobilePhone(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(mobilePhone, friendMobilePhone, block)))
+	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
+	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(phoneNumber, friendphoneNumber, block)))
 }
 
 func UnHideFriend(w http.ResponseWriter, r *http.Request) {
 	hide := 1
-	mobilePhone := r.Header.Get("mobile_phone")
-	friendMobilePhone := decodeActionFriendMobilePhone(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(mobilePhone, friendMobilePhone, hide)))
+	phoneNumber := r.Header.Get("phone_number")
+	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
+	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(phoneNumber, friendphoneNumber, hide)))
 }
 
 //User Controller Private Function
 
-func isErrNotNil(w http.ResponseWriter, err error) bool {
+func isErrNotNil(w http.ResponseWriter, status int, err error) bool {
 	if err != nil {
-		w.WriteHeader(500)
-		routes.ServeJson(w, service.GetErrorMessageType(500, err.Error()))
+		w.WriteHeader(status)
+		routes.ServeJson(w, service.GetErrorMessageType(status, err.Error()))
 		return true
 	}
 	return false
@@ -338,41 +283,46 @@ func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
 }
 
 func printResult(w http.ResponseWriter, status int, message string, valueType interface{}) {
-	if status != 200 {
+	if isStatusNotOK(w, status, message) {
 		routes.ServeJson(w, service.GetErrorMessageType(status, message))
-	} else {
-		routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
+		return
 	}
+	routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
+
 }
 
 func selectUserSQL(condition string) string {
-	return service.SelectQuery("user_id, user_name, mobile_phone, profile_picture", "users", condition)
+	return service.SelectQuery("user_id, user_name, phone_number, profile_picture", "users", condition)
 }
 
 func resultSelectUserSQL(w http.ResponseWriter, sequel string) {
 	rows, err := service.ExecuteChannelSqlRows(sequel)
-	if err != nil {
+	if isErrNotNil(w, 500, err) {
 		w.WriteHeader(500)
 		routes.ServeJson(w, service.GetErrorMessageType(500, err.Error()))
-	} else {
-		chanUsers := make(chan responses.GeneralArrMsg)
-		go mapUsers(rows, chanUsers)
-		select {
-		case resChanUsers := <-chanUsers:
-			close(chanUsers)
-			w.WriteHeader(http.StatusOK)
-			routes.ServeJson(w, service.GetGeneralMsgType(http.StatusOK, "success", resChanUsers))
-		case <-service.TimeOutInMilis(service.GlobalTimeOutDB):
-			close(chanUsers)
-			w.WriteHeader(508)
-			routes.ServeJson(w, service.GetErrorMessageType(508, "request timeout"))
+		return
+	}
+	chanUsers := make(chan responses.GeneralArrMsg)
+	go mapUsers(rows, chanUsers)
+	select {
+	case resChanUsers := <-chanUsers:
+		close(chanUsers)
+		if resChanUsers.Datas == nil {
+			betterEmptyThanNil := make([]interface{}, 0)
+			resChanUsers.Datas = betterEmptyThanNil
 		}
+		w.WriteHeader(http.StatusOK)
+		routes.ServeJson(w, service.GetGeneralMsgType(http.StatusOK, "success", resChanUsers))
+	case <-service.TimeOutInMilis(service.GlobalTimeOutDB):
+		close(chanUsers)
+		w.WriteHeader(508)
+		routes.ServeJson(w, service.GetErrorMessageType(508, "request timeout"))
 	}
 }
 
-func getStatusMobilePhone(r *http.Request) (status int, mobilePhone string) {
+func getStatusphoneNumber(r *http.Request) (status int, phoneNumber string) {
 	status, _ = strconv.Atoi(r.Header.Get("status_filter"))
-	mobilePhone = r.Header.Get("mobile_phone")
+	phoneNumber = r.Header.Get("phone_number")
 	return
 }
 
@@ -383,9 +333,9 @@ func mapContactListJson(contactListJson requests.ContactList) chan string {
 		contact := contactListJson.Contact
 		for i, value := range contact {
 			if i >= (len(contact) - 1) {
-				listContact += value.MobilePhone
+				listContact += value
 			} else {
-				listContact += value.MobilePhone + ", "
+				listContact += value + ", "
 			}
 		}
 		chanListContact <- listContact
@@ -393,22 +343,22 @@ func mapContactListJson(contactListJson requests.ContactList) chan string {
 	return chanListContact
 }
 
-func sqlDeleteFriendRelationship(mobilePhone string, friendMobilePhone string, friendshipStatus int) (status int, message string) {
-	sequel := fmt.Sprintf("Delete FROM friends_relationship WHERE user_mobile_phone = '%s' and friend_mobile_phone = '%s' and status = %v",
-		mobilePhone, friendMobilePhone, friendshipStatus)
+func sqlDeleteFriendRelationship(phoneNumber string, friendphoneNumber string, friendshipStatus int) (status int, message string) {
+	sequel := fmt.Sprintf("Delete FROM friends_relationship WHERE user_phone_number = '%s' and friend_phone_number = '%s' and status = %v",
+		phoneNumber, friendphoneNumber, friendshipStatus)
 	status, message = service.ExecuteChannelSqlResult(sequel)
 	return
 }
 
-func decodeActionFriendMobilePhone(body io.ReadCloser) string {
+func decodeActionFriendphoneNumber(body io.ReadCloser) string {
 	actionToFriend := requests.ActionToFriend{}
 	service.DecodeJson(&actionToFriend, body)
-	return actionToFriend.MobilePhone
+	return actionToFriend.PhoneNumber
 }
 
-func blockFriend(mobilePhone string, friendMobilePhone string, status int) (int, string) {
+func blockFriend(phoneNumber string, friendphoneNumber string, status int) (int, string) {
 	friendUserId := 0
-	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(friendMobilePhone))
+	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(friendphoneNumber))
 
 	switch {
 	case err != nil:
@@ -422,8 +372,8 @@ func blockFriend(mobilePhone string, friendMobilePhone string, status int) (int,
 		case statusRow != 200:
 			return statusRow, messageRow
 		default:
-			sequel := fmt.Sprintf("INSERT INTO friends_relationship SET user_mobile_phone =  '%s', friend_mobile_phone = '%s', status = %v",
-				mobilePhone, friendMobilePhone, status)
+			sequel := fmt.Sprintf("INSERT INTO friends_relationship SET user_phone_number =  '%s', friend_phone_number = '%s', status = %v",
+				phoneNumber, friendphoneNumber, status)
 
 			statusInsert, messageInsert := service.ExecuteChannelSqlResult(sequel)
 			return statusInsert, messageInsert
@@ -446,20 +396,19 @@ func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) chan respo
 
 func assignedMapedUsers(rows *sql.Rows, chanUser chan requests.User) chan requests.User {
 	user := atomicUser(requests.User{})
-	rows.Scan(&user.UserId, &user.UserName, &user.MobilePhone, &user.ProfilePicture)
+	rows.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
 	chanUser <- user
 	return chanUser
 }
 
-func insertTokenToUsersTable(token string, mobilePhone string) (int, string) {
+func insertTokenToUsersTable(token string, phoneNumber string) (int, string) {
 	field := fmt.Sprintf("token = '%s'", token)
-	condition := fmt.Sprintf("mobile_phone = '%s'", mobilePhone)
-	sequel := service.UpdateQuery("users", field, condition)
-	return service.ExecuteChannelSqlResult(sequel)
+	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+	return service.UpdateQuery("users", field, condition)
 }
 
-func hashedMobileNumber(mobilePhone string) string {
-	mobileBytes := []byte(mobilePhone)
+func hashedMobileNumber(phoneNumber string) string {
+	mobileBytes := []byte(phoneNumber)
 	hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
 	if err != nil {
 		return err.Error()
@@ -478,10 +427,10 @@ func findOrCreateDirectory(targetPath string) error {
 
 func allowedImageType(contentType string) bool {
 	m := map[string]bool{
-		"png":  true,
-		"jpeg": true,
-		"jpg":  true,
-		"gif":  true,
+		"image/png":  true,
+		"image/jpeg": true,
+		"image/jpg":  true,
+		"image/gif":  true,
 	}
 	_, isImageAllowed := m[contentType]
 	return isImageAllowed
@@ -519,7 +468,7 @@ func printUploadError(w http.ResponseWriter, err error) {
 	}
 }
 
-func getUserIdSQL(mobilePhone string) string {
-	condition := fmt.Sprintf(" mobile_phone = '%s'", mobilePhone)
+func getUserIdSQL(phoneNumber string) string {
+	condition := fmt.Sprintf(" phone_number = '%s'", phoneNumber)
 	return service.SelectQuery("user_id", "users", condition)
 }

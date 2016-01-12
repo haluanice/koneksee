@@ -129,10 +129,9 @@ func ExecuteUpdateSqlResult(sequel string) (int, string) {
 	}
 }
 
-func GenerateNewPath(path string, fileType string) (pathFile string, nameFile string, err error) {
+func GenerateNewPath() (nameFile string, err error) {
 	uuid, err := exec.Command("uuidgen").Output()
-	nameFile = fmt.Sprintf("%x.%s", uuid, fileType)
-	pathFile = fmt.Sprintf("%s%s", path, nameFile)
+	nameFile = fmt.Sprintf("%x", uuid)
 	return
 }
 

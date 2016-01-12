@@ -30,7 +30,7 @@ func GetTokenHeader(authHeader string) (status int, message string, mobilePhone 
 	splitToken := strings.Split(authHeader, "Bearer ")
 	token := splitToken[len(splitToken)-1]
 
-	sequel := fmt.Sprintf("select mobile_phone from users where token = '%s'", token)
+	sequel := fmt.Sprintf("select phone_number from users where token = '%s'", token)
 
 	sqlRow, err := ExecuteChannelSqlRow(sequel)
 	switch {

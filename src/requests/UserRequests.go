@@ -4,31 +4,31 @@ package requests
 type User struct {
 	UserId         int    `json:"user_id"`
 	UserName       string `json:"user_name"`
-	MobilePhone    string `json:"mobile_phone"`
+	PhoneNumber    string `json:"phone_number"`
 	ProfilePicture string `json:"profile_picture"`
 }
 
 type UserUpdateType struct {
 	UserName    string `json:"user_name"`
-	MobilePhone string `json:"mobile_phone"`
+	PhoneNumber string `json:"phone_number"`
 }
 
 type UserProfilePictureType struct {
-	MobilePhone    string `json:"mobile_phone"`
+	PhoneNumber    string `json:"phone_number"`
 	ProfilePicture string `json:"profile_picture"`
 }
 
-type MobilePhoneJson struct {
-	MobilePhone string `json:"mobile_phone"`
+type PhoneNumberJson struct {
+	PhoneNumber string `json:"phone_number"`
 }
 
 type UserToken struct {
-	MobilePhone string `json:"mobile_phone"`
+	PhoneNumber string `json:"phone_number"`
 	Token       string `json:"token"`
 }
 
 type ContactList struct {
-	Contact []MobilePhoneJson `json:"data"`
+	Contact []string `json:"phone_number"`
 }
 
 type UpdateUserName struct {
@@ -36,5 +36,5 @@ type UpdateUserName struct {
 }
 
 type ActionToFriend struct {
-	MobilePhone string `json:"mobile_phone"`
+	PhoneNumber string `json:"phone_number"`
 }
