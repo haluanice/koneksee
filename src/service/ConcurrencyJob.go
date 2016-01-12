@@ -45,6 +45,7 @@ func MutexTime() {
 }
 
 func ExecuteChannelSqlRow(sequel string) (*sql.Row, error) {
+	fmt.Println(sequel)
 	channelSqlRow := make(chan *sql.Row)
 	go QueryRowSQL(sequel, channelSqlRow)
 	select {
@@ -86,7 +87,7 @@ func ExecuteInsertSqlResult(sequel string) (int, string, int64) {
 			case affectedRow < int64(1):
 				return 422, "data not efefcted", 0
 			default:
-				return 200, "success", newId
+				return 201, "created", newId
 			}
 		}
 	case <-TimeOutInMilis(GlobalTimeOutDB):

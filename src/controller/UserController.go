@@ -21,16 +21,19 @@ import (
 )
 
 var (
-	globalExecutionUser  atomic.Value
-	globalExecutionUsers atomic.Value
+	executionUser  atomic.Value
+	executionUsers atomic.Value
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
 	phoneNumber := r.Header.Get("mobile_phone")
 	contactListJson := requests.ContactList{}
 	service.DecodeJson(&contactListJson, r.Body)
-
-	chanContactString := mapContactListJson(contactListJson)
+	contacts := contactListJson.Contact
+	if len(contacts) > service.ReqContactsTreshold {
+		return
+	}
+	chanContactString := mapContactListJson(contacts)
 	contact := <-chanContactString
 	close(chanContactString)
 
@@ -63,12 +66,11 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 	errSqlRow := sqlRow.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
 	statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
-	w.WriteHeader(statusRow)
 	printResult(w, statusRow, messageRow, user)
 }
 
 func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
-	user_id := 0
+	userId := 0
 	userTokenJson := requests.PhoneNumberJson{}
 	service.DecodeJson(&userTokenJson, r.Body)
 
@@ -76,7 +78,7 @@ func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
 	if isErrNotNil(w, 508, err) {
 		return
 	}
-	errSqlRow := sqlRow.Scan(&user_id)
+	errSqlRow := sqlRow.Scan(&userId)
 	status, message := service.CheckScanRowSQL(errSqlRow)
 	if isStatusNotOK(w, status, message) {
 		return
@@ -98,17 +100,16 @@ func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 	service.DecodeJson(&userTokenJson, r.Body)
 	newphoneNumber := userTokenJson.PhoneNumber
 	if phoneNumber == "" {
+		w.WriteHeader(400)
 		routes.ServeJson(w, service.GetErrorMessageType(400, "data empty"))
 	} else {
 		resultHashed := hashedMobileNumber(phoneNumber)
 		field := fmt.Sprintf("phone_number = '%s', token = '%s'", newphoneNumber, resultHashed)
 		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
 		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-		w.WriteHeader(statusUpdate)
 		userToken := requests.UserToken{newphoneNumber, resultHashed}
 		printResult(w, statusUpdate, messageUpdate, userToken)
 	}
-
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +125,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	status, message, newId := service.ExecuteInsertSqlResult(SQL)
 	userCreated := responses.UserCreated{int(newId), NewUser.UserName, NewUser.PhoneNumber, fmt.Sprintf("%s", hashedPassword)}
 	switch {
-	case status == 409:
+	case status == http.StatusConflict:
 		// 1. Update user_name and token in users
 		field := fmt.Sprintf("user_name='%s', token = '%s'", NewUser.UserName, hashedPassword)
 		condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
@@ -132,7 +133,6 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		if isStatusNotOK(w, statusUpdate, messageUpdate) {
 			return
 		}
-
 		// 2. Get user_id
 		conditionSelect := fmt.Sprintf("phone_number = %s", NewUser.PhoneNumber)
 		sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
@@ -140,19 +140,18 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		if isErrNotNil(w, 508, err) {
 			return
 		}
-
 		// 3. Check if result exists
 		errSqlRow := sqlRow.Scan(&userCreated.UserId)
 		statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
 		if isStatusNotOK(w, statusRow, messageRow) {
 			return
 		}
-
 		// 4. Return existing mobile_phone with given user_name and new token
 		w.WriteHeader(statusRow)
 		routes.ServeJson(w, service.GetGeneralMsgType(statusRow, messageRow, userCreated))
 	default:
-		printResult(w, status, message, userCreated)
+		w.WriteHeader(status)
+		routes.ServeJson(w, service.GetGeneralMsgType(status, message, userCreated))
 	}
 }
 
@@ -174,17 +173,15 @@ func DeleteUser(w http.ResponseWriter, r *http.Request) {
 	SQL := fmt.Sprintf("Delete FROM users WHERE phone_number = '%s'", phoneNumber)
 
 	statusResult, messageResult := service.ExecuteChannelSqlResult(SQL)
-	w.WriteHeader(statusResult)
 	printResult(w, statusResult, messageResult, requests.PhoneNumberJson{phoneNumber})
 }
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
 	phoneNumber := r.Header.Get("phone_number")
 	file, header, err := r.FormFile("file")
-
+	statusNotAcceptable := http.StatusNotAcceptable
 	// 1. Get file from form-data
-	if err != nil {
-		printUploadError(w, err)
+	if isErrNotNil(w, statusNotAcceptable, err) {
 		return
 	}
 	// 2. Read file
@@ -192,77 +189,66 @@ func UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	if !allowedImageType(fileType) {
 		w.WriteHeader(http.StatusUnsupportedMediaType)
-		routes.ServeJson(w, service.GetErrorMessageType(415, "type is not allowed"))
+		routes.ServeJson(w, service.GetErrorMessageType(http.StatusUnsupportedMediaType, "type is not allowed"))
 		return
 	}
-
 	// 3. Generate new filename
 	nameFile, errNewPath := service.GenerateNewPath()
-	if errNewPath != nil {
-		printUploadError(w, errNewPath)
+	if isErrNotNil(w, statusNotAcceptable, errNewPath) {
 		return
 	}
 	// 4. Read multipart file
 
 	buff, errReadFile := ioutil.ReadAll(file)
-	if errReadFile != nil {
-		printUploadError(w, errReadFile)
+	if isErrNotNil(w, statusNotAcceptable, errReadFile) {
+		return
 	}
 	//5. Upload to cloudinary
 	resChannelUpload := service.UploadImage(nameFile, buff)
 	cloudinaryInfo := <-resChannelUpload
 	close(resChannelUpload)
 	if cloudinaryInfo.Err != nil {
-		w.WriteHeader(500)
-		routes.ServeJson(w, service.GetErrorMessageType(500, "internal server error with cloudinary"))
+		internalServerStatus := http.StatusInternalServerError
+		w.WriteHeader(internalServerStatus)
+		routes.ServeJson(w, service.GetErrorMessageType(internalServerStatus, "internal server error with cloudinary"))
 		return
 	}
-
 	// 6. Update cloudinary path to profile user
 	cloudinaryPath := cloudinaryInfo.FilePath
 	field := fmt.Sprintf("profile_picture = '%s'", cloudinaryPath)
 	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
 	statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-	w.WriteHeader(statusUpdate)
-	printResult(w, statusUpdate, messageUpdate, requests.UserProfilePictureType{phoneNumber, cloudinaryPath})
-
+	profilePictureUser := requests.UserProfilePictureType{phoneNumber, cloudinaryPath}
+	printResult(w, statusUpdate, messageUpdate, profilePictureUser)
 }
 
 func BlockFriend(w http.ResponseWriter, r *http.Request) {
 	block := 0
 	status, phoneNumber := getStatusphoneNumber(r)
-
-	w.WriteHeader(status)
-	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(phoneNumber, friendphoneNumber, block)))
-}
-
-func HideFriend(w http.ResponseWriter, r *http.Request) {
-	hide := 1
-	status, phoneNumber := getStatusphoneNumber(r)
-
-	w.WriteHeader(status)
-	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(blockFriend(phoneNumber, friendphoneNumber, hide)))
-
+	friendPhoneNumber := decodeActionFriendMobilePhone(r.Body)
+	status, message := blockFriend(phoneNumber, friendPhoneNumber, block)
+	printDefaultMessage(w, status, message)
 }
 
 func UnBlockFriend(w http.ResponseWriter, r *http.Request) {
 	block := 0
 	status, phoneNumber := getStatusphoneNumber(r)
-	w.WriteHeader(status)
-	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(phoneNumber, friendphoneNumber, block)))
-}
-
-func UnHideFriend(w http.ResponseWriter, r *http.Request) {
-	hide := 1
-	phoneNumber := r.Header.Get("phone_number")
-	friendphoneNumber := decodeActionFriendphoneNumber(r.Body)
-	routes.ServeJson(w, service.GetErrorMessageType(sqlDeleteFriendRelationship(phoneNumber, friendphoneNumber, hide)))
+	friendPhoneNumber := decodeActionFriendphoneNumber(r.Body)
+	status, message := sqlDeleteFriendRelationship(phoneNumber, friendPhoneNumber, block)
+	printDefaultMessage(w, status, message)
 }
 
 //User Controller Private Function
+
+func printDefaultMessage(w http.ResponseWriter, status int, message string) {
+	w.WriteHeader(status)
+	routes.ServeJson(w, service.GetDefaultMessage(status, message))
+}
+func decodeActionFriendMobilePhone(body io.ReadCloser) string {
+	actionToFriend := requests.ActionToFriend{}
+	service.DecodeJson(&actionToFriend, body)
+	return actionToFriend.PhoneNumber
+}
 
 func isErrNotNil(w http.ResponseWriter, status int, err error) bool {
 	if err != nil {
@@ -274,7 +260,7 @@ func isErrNotNil(w http.ResponseWriter, status int, err error) bool {
 }
 
 func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
-	if status != 200 {
+	if status != http.StatusOK {
 		w.WriteHeader(status)
 		routes.ServeJson(w, service.GetErrorMessageType(status, message))
 		return true
@@ -283,12 +269,12 @@ func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
 }
 
 func printResult(w http.ResponseWriter, status int, message string, valueType interface{}) {
+	w.WriteHeader(status)
 	if isStatusNotOK(w, status, message) {
 		routes.ServeJson(w, service.GetErrorMessageType(status, message))
 		return
 	}
 	routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
-
 }
 
 func selectUserSQL(condition string) string {
@@ -297,26 +283,23 @@ func selectUserSQL(condition string) string {
 
 func resultSelectUserSQL(w http.ResponseWriter, sequel string) {
 	rows, err := service.ExecuteChannelSqlRows(sequel)
-	if isErrNotNil(w, 500, err) {
-		w.WriteHeader(500)
-		routes.ServeJson(w, service.GetErrorMessageType(500, err.Error()))
+	internalServerStatus := http.StatusInternalServerError
+	if isErrNotNil(w, internalServerStatus, err) {
+		w.WriteHeader(internalServerStatus)
+		routes.ServeJson(w, service.GetErrorMessageType(internalServerStatus, err.Error()))
 		return
 	}
-	chanUsers := make(chan responses.GeneralArrMsg)
-	go mapUsers(rows, chanUsers)
 	select {
-	case resChanUsers := <-chanUsers:
-		close(chanUsers)
+	case resChanUsers := <-mapUsers(rows):
 		if resChanUsers.Datas == nil {
 			betterEmptyThanNil := make([]interface{}, 0)
 			resChanUsers.Datas = betterEmptyThanNil
 		}
-		w.WriteHeader(http.StatusOK)
-		routes.ServeJson(w, service.GetGeneralMsgType(http.StatusOK, "success", resChanUsers))
+		statusOK := http.StatusOK
+		w.WriteHeader(statusOK)
+		routes.ServeJson(w, service.GetGeneralMsgType(statusOK, "success", resChanUsers))
 	case <-service.TimeOutInMilis(service.GlobalTimeOutDB):
-		close(chanUsers)
-		w.WriteHeader(508)
-		routes.ServeJson(w, service.GetErrorMessageType(508, "request timeout"))
+		printDefaultMessage(w, 508, "request timeout")
 	}
 }
 
@@ -326,13 +309,13 @@ func getStatusphoneNumber(r *http.Request) (status int, phoneNumber string) {
 	return
 }
 
-func mapContactListJson(contactListJson requests.ContactList) chan string {
+func mapContactListJson(contacts []string) chan string {
 	chanListContact := make(chan string)
 	go func() {
-		listContact := ""
-		contact := contactListJson.Contact
-		for i, value := range contact {
-			if i >= (len(contact) - 1) {
+		var listContact string
+		sizeContacts := len(contacts)
+		for i, value := range contacts {
+			if i >= (sizeContacts - 1) {
 				listContact += value
 			} else {
 				listContact += value + ", "
@@ -356,9 +339,9 @@ func decodeActionFriendphoneNumber(body io.ReadCloser) string {
 	return actionToFriend.PhoneNumber
 }
 
-func blockFriend(phoneNumber string, friendphoneNumber string, status int) (int, string) {
-	friendUserId := 0
-	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(friendphoneNumber))
+func blockFriend(phoneNumber string, friendPhoneNumber string, status int) (int, string) {
+	var friendUserId int
+	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(friendPhoneNumber))
 
 	switch {
 	case err != nil:
@@ -373,7 +356,7 @@ func blockFriend(phoneNumber string, friendphoneNumber string, status int) (int,
 			return statusRow, messageRow
 		default:
 			sequel := fmt.Sprintf("INSERT INTO friends_relationship SET user_phone_number =  '%s', friend_phone_number = '%s', status = %v",
-				phoneNumber, friendphoneNumber, status)
+				phoneNumber, friendPhoneNumber, status)
 
 			statusInsert, messageInsert := service.ExecuteChannelSqlResult(sequel)
 			return statusInsert, messageInsert
@@ -381,15 +364,18 @@ func blockFriend(phoneNumber string, friendphoneNumber string, status int) (int,
 	}
 }
 
-func mapUsers(rows *sql.Rows, chanUsers chan responses.GeneralArrMsg) chan responses.GeneralArrMsg {
+func mapUsers(rows *sql.Rows) chan responses.GeneralArrMsg {
 	users := atomicUsers(responses.GeneralArrMsg{})
-	chanUser := make(chan requests.User)
-	for rows.Next() {
-		go assignedMapedUsers(rows, chanUser)
-		resChanUser := <-chanUser
-		users.Datas = append(users.Datas, resChanUser)
-	}
-	close(chanUser)
+	chanUsers := make(chan responses.GeneralArrMsg)
+	go func() {
+		chanUser := make(chan requests.User)
+		for rows.Next() {
+			go assignedMapedUsers(rows, chanUser)
+			resChanUser := <-chanUser
+			users.Datas = append(users.Datas, resChanUser)
+		}
+		close(chanUser)
+	}()
 	chanUsers <- users
 	return chanUsers
 }
@@ -442,15 +428,15 @@ func updateUserExecutor(sequel string) (int, string) {
 
 func atomicUser(user requests.User) requests.User {
 	service.MutexTime()
-	globalExecutionUser.Store(user)
-	dataUser := globalExecutionUser.Load().(requests.User)
+	executionUser.Store(user)
+	dataUser := executionUser.Load().(requests.User)
 	return dataUser
 }
 
 func atomicUsers(users responses.GeneralArrMsg) responses.GeneralArrMsg {
 	service.MutexTime()
-	globalExecutionUsers.Store(users)
-	dataUsers := globalExecutionUsers.Load().(responses.GeneralArrMsg)
+	executionUsers.Store(users)
+	dataUsers := executionUsers.Load().(responses.GeneralArrMsg)
 	return dataUsers
 }
 
@@ -459,13 +445,6 @@ func newUserJson(body io.ReadCloser) requests.User {
 	NewUser := requests.User{}
 	decoder.Decode(&NewUser)
 	return NewUser
-}
-
-func printUploadError(w http.ResponseWriter, err error) {
-	if err != nil {
-		w.WriteHeader(406)
-		routes.ServeJson(w, service.GetErrorMessageType(406, err.Error()))
-	}
 }
 
 func getUserIdSQL(phoneNumber string) string {

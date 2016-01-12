@@ -40,9 +40,7 @@ func GroupAuthorize(mux *routes.RouteMux) {
 	mux.Put("/api/v1/users/:id/avatar", controller.UploadFile)
 
 	mux.Post("/api/v1/users/:id/block", controller.BlockFriend)
-	mux.Post("/api/v1/users/:id/hide", controller.HideFriend)
 	mux.Del("/api/v1/users/:id/block", controller.UnBlockFriend)
-	mux.Del("/api/v1/users/:id/hide", controller.UnHideFriend)
 }
 
 func FilterToken(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +67,7 @@ func FilterToken(w http.ResponseWriter, r *http.Request) {
 		r.Header.Set("status_filter", strconv.Itoa(status))
 		if status != 200 {
 			w.WriteHeader(status)
-			routes.ServeJson(w, responses.ErrorMessage{status, message})
+			routes.ServeJson(w, responses.DefaultMessage{status, message})
 		}
 	}
 }

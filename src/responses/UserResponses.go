@@ -1,7 +1,7 @@
 // UserResponses
 package responses
 
-type ErrorMessage struct {
+type DefaultMessage struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
 }
