@@ -32,6 +32,7 @@ var _ = Describe("Server", func() {
 					gory.Build("user"))
 				request, _ = http.NewRequest(
 					"POST", "/api/v1/users", bytes.NewReader(body))
+				request.Header.Set("Authorization", "1234")
 			})
 			It("returns a status code of 201", func() {
 				server.ServeHTTP(recorder, request)
@@ -45,6 +46,7 @@ var _ = Describe("Server", func() {
 					gory.Build("userNameEmpty"))
 				request, _ = http.NewRequest(
 					"POST", "/api/v1/users", bytes.NewReader(body))
+				request.Header.Set("Authorization", "1234")
 			})
 			It("returns a status code of 201", func() {
 				server.ServeHTTP(recorder, request)
@@ -57,8 +59,9 @@ var _ = Describe("Server", func() {
 					gory.Build("phoneNumberEmpty"))
 				request, _ = http.NewRequest(
 					"POST", "/api/v1/users", bytes.NewReader(body))
+				request.Header.Set("Authorization", "1234")
 			})
-			It("returns a status code of 201", func() {
+			It("phone number empty returns 422", func() {
 				server.ServeHTTP(recorder, request)
 				Expect(recorder.Code).To(Equal(422))
 			})
@@ -69,6 +72,7 @@ var _ = Describe("Server", func() {
 					gory.Build("phoneNumberAndUserEmpty"))
 				request, _ = http.NewRequest(
 					"POST", "/api/v1/users", bytes.NewReader(body))
+				request.Header.Set("Authorization", "1234")
 			})
 			It("returns a status code of 201", func() {
 				server.ServeHTTP(recorder, request)

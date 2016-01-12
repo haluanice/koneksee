@@ -113,6 +113,10 @@ func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "1234" {
+		w.WriteHeader(500)
+		return
+	}
 	NewUser := atomicUser(newUserJson(r.Body))
 	if NewUser.PhoneNumber == "" {
 		w.WriteHeader(422)
