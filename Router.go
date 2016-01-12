@@ -16,7 +16,8 @@ import (
 
 type Server *martini.ClassicMartini
 
-func Run() {
+func Run(dbName string) {
+	service.NewDatabase(dbName)
 	mux := martini.Classic()
 	UnAuthorizedGroup(mux)
 	mux.Use(FilterToken)
@@ -25,7 +26,8 @@ func Run() {
 	http.ListenAndServe(":8080", nil)
 	// mux.Run()
 }
-func Routes() *martini.ClassicMartini {
+func Routes(dbName string) *martini.ClassicMartini {
+	service.NewDatabase(dbName)
 	mux := Server(martini.Classic())
 	UnAuthorizedGroup(mux)
 	AutHorizedGroup(mux)

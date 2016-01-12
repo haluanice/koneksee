@@ -4,14 +4,15 @@ package service
 import (
 	"database/sql"
 
+	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-var database = databaseFire()
+var database *sql.DB
 
-func databaseFire() *sql.DB {
-	database, _ := sql.Open("mysql", "root:@/koneksee")
-	return database
+func NewDatabase(dbName string) {
+	dataBaseCredentials := fmt.Sprintf("root:@/%s", dbName)
+	database, _ = sql.Open("mysql", dataBaseCredentials)
 }
 
 func ExecSQL(sql string, channel chan ExecSQLType) chan ExecSQLType {
