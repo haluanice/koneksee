@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/go-martini/martini"
+	"github.com/drone/routes"
+	_ "github.com/go-martini/martini"
 	"github.com/modocache/gory"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -21,7 +22,7 @@ func slice(data interface{}) map[string]interface{} {
 }
 
 var _ = Describe("Server", func() {
-	var server *martini.ClassicMartini
+	var server *routes.RouteMux
 	var request *http.Request
 	var recorder *httptest.ResponseRecorder
 	var newId float64

@@ -17,7 +17,7 @@ import (
 	"strconv"
 
 	"github.com/drone/routes"
-	"github.com/go-martini/martini"
+	_ "github.com/go-martini/martini"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -64,10 +64,10 @@ func GetUsersBlocked(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func GetUser(w http.ResponseWriter, r *http.Request, params martini.Params) {
+func GetUser(w http.ResponseWriter, r *http.Request) {
 	chanFinish := make(chan bool)
 	go func() {
-		id, _ := strconv.Atoi(params["id"])
+		id := r.Header.Get("user_id")
 		user := atomicUser(model.User{})
 
 		condition := fmt.Sprintf("user_id = %v", id)
@@ -224,9 +224,9 @@ func UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
 	}()
 	_ = <-chanFinish
 }
-func UpdateUserProfile(w http.ResponseWriter, r *http.Request, params martini.Params) {
+func UpdateUserProfile(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		id, _ := strconv.Atoi(params["id"])
+		id, _ := strconv.Atoi(r.Header.Get("user_id"))
 		file, header, err := r.FormFile("file")
 		if isErrNotNil(w, http.StatusNotAcceptable, err) {
 			return
