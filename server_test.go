@@ -144,7 +144,7 @@ var _ = Describe("Server", func() {
 			})
 		})
 	})
-	Describe("POST /api/v1/users/index", func() {
+	Describe("POST /api/v1/users/sync", func() {
 		Context("view index person", func() {
 			BeforeEach(func() {
 				body, _ := json.Marshal(

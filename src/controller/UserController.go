@@ -24,7 +24,7 @@ import (
 var (
 	executionUser  atomic.Value
 	executionUsers atomic.Value
-	chanFinish     = make(chan bool, 10000000)
+	chanFinish     = make(chan bool, 1000)
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +147,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		mobileBytes := []byte(NewUser.PhoneNumber)
 		hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
 
-		if isErrNotNil(w, 508, err) {
+		if err != nil {
 			chanCreate <- model.GeneralMsg{508, err.Error(), NewUser}
 			return
 		}
@@ -163,20 +163,23 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 			// 1. Update user_name and token in users
 			condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
 			statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-			if isStatusNotOK(w, statusUpdate, messageUpdate) {
+			if statusUpdate != http.StatusOK {
+				chanCreate <- model.GeneralMsg{statusUpdate, messageUpdate, NewUser}
 				return
 			}
 			// 2. Get user_id
 			conditionSelect := fmt.Sprintf("phone_number = %s", NewUser.PhoneNumber)
 			sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
 			sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
-			if isErrNotNil(w, 508, err) {
+			if err != nil {
+				chanCreate <- model.GeneralMsg{508, err.Error(), NewUser}
 				return
 			}
 			// 3. Check if result exists
 			errSqlRow := sqlRow.Scan(&NewUser.UserId)
 			statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
-			if isStatusNotOK(w, statusRow, messageRow) {
+			if statusUpdate != http.StatusOK {
+				chanCreate <- model.GeneralMsg{statusRow, messageRow, NewUser}
 				return
 			}
 			// 4. Return existing mobile_phone with given user_name and new token
