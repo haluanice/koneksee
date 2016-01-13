@@ -2,9 +2,9 @@ package service
 
 import (
 	"fmt"
+	"model"
 	"net/http"
 	"os"
-	"responses"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -54,16 +54,16 @@ func StringtoInt(integer string) int {
 	newInteger, _ := strconv.ParseInt(integer, 10, 0)
 	return int(newInteger)
 }
-func GetDefaultMessage(status int, message string) responses.DefaultMessage {
-	globalExecutionErrorMessage.Store(responses.DefaultMessage{status, message})
-	return globalExecutionErrorMessage.Load().(responses.DefaultMessage)
+func GetDefaultMessage(status int, message string) model.DefaultMessage {
+	globalExecutionErrorMessage.Store(model.DefaultMessage{status, message})
+	return globalExecutionErrorMessage.Load().(model.DefaultMessage)
 }
-func GetErrorMessageType(status int, message string) responses.DefaultMessage {
+func GetErrorMessageType(status int, message string) model.DefaultMessage {
 	return GetDefaultMessage(status, message)
 }
 
-func GetGeneralMsgType(status int, message string, v interface{}) responses.GeneralMsg {
-	return responses.GeneralMsg{status, message, v}
+func GetGeneralMsgType(status int, message string, v interface{}) model.GeneralMsg {
+	return model.GeneralMsg{status, message, v}
 }
 
 func DBErrorParser(err string) (string, int64) {

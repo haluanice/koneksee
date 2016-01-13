@@ -10,248 +10,345 @@ import (
 	"sync/atomic"
 
 	"encoding/json"
+	"mime/multipart"
+	"model"
 	"net/http"
-	"requests"
-	"responses"
 	"service"
 	"strconv"
 
 	"github.com/drone/routes"
+	"github.com/go-martini/martini"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var (
 	executionUser  atomic.Value
 	executionUsers atomic.Value
+	chanFinish     = make(chan bool, 10000000)
 )
 
 func GetUsers(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("mobile_phone")
-	contactListJson := requests.ContactList{}
-	service.DecodeJson(&contactListJson, r.Body)
-	contacts := contactListJson.Contact
-	if len(contacts) > service.ReqContactsTreshold {
-		return
-	}
-	chanContactString := mapContactListJson(contacts)
-	contact := <-chanContactString
-	close(chanContactString)
+	go func() {
+		phoneNumber := r.Header.Get("mobile_phone")
+		contactListJson := model.ContactList{}
+		service.DecodeJson(&contactListJson, r.Body)
+		contacts := contactListJson.Contact
+		if len(contacts) > service.ReqContactsTreshold {
+			return
+		}
+		chanContactString := mapContactListJson(contacts)
+		contact := <-chanContactString
+		close(chanContactString)
 
-	condition := fmt.Sprintf("phone_number IN (%s) AND phone_number NOT IN "+
-		" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
-		" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", contact, phoneNumber)
-	sequel := selectUserSQL(condition)
-	resultSelectUserSQL(w, sequel)
+		condition := fmt.Sprintf("phone_number IN (%s) AND phone_number NOT IN "+
+			" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
+			" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", contact, phoneNumber)
+		sequel := selectUserSQL(condition)
+		resultSelectUserSQL(w, sequel)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
 }
 
 func GetUsersBlocked(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("mobile_phone")
-	condition := fmt.Sprintf("phone_number IN "+
-		" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
-		" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", phoneNumber)
-	sequel := selectUserSQL(condition)
-	resultSelectUserSQL(w, sequel)
+	go func() {
+		phoneNumber := r.Header.Get("mobile_phone")
+		condition := fmt.Sprintf("phone_number IN "+
+			" (SELECT friend_phone_number FROM users u JOIN friends_relationship fr "+
+			" ON u.`phone_number` = fr.`user_phone_number` WHERE u.`phone_number` = '%s' )", phoneNumber)
+		sequel := selectUserSQL(condition)
+		resultSelectUserSQL(w, sequel)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+
 }
 
-func GetUser(w http.ResponseWriter, r *http.Request) {
-	urlParams := r.URL.Query()
-	id := urlParams.Get(":id")
-	user := atomicUser(requests.User{})
+func GetUser(w http.ResponseWriter, r *http.Request, params martini.Params) {
+	chanFinish := make(chan bool)
+	go func() {
+		id, _ := strconv.Atoi(params["id"])
+		user := atomicUser(model.User{})
 
-	condition := fmt.Sprintf("user_id = %s", id)
-	sequel := service.SelectQuery("user_id, user_name, phone_number, profile_picture", "users", condition)
-	sqlRow, err := service.ExecuteChannelSqlRow(sequel)
-	if isErrNotNil(w, 508, err) {
-		return
-	}
-	errSqlRow := sqlRow.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
-	statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
-	printResult(w, statusRow, messageRow, user)
-}
-
-func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
-	userId := 0
-	userTokenJson := requests.PhoneNumberJson{}
-	service.DecodeJson(&userTokenJson, r.Body)
-
-	sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(userTokenJson.PhoneNumber))
-	if isErrNotNil(w, 508, err) {
-		return
-	}
-	errSqlRow := sqlRow.Scan(&userId)
-	status, message := service.CheckScanRowSQL(errSqlRow)
-	if isStatusNotOK(w, status, message) {
-		return
-	}
-	phoneNumber := userTokenJson.PhoneNumber
-	resultHashed := hashedMobileNumber(phoneNumber)
-	statusInsertToken, messageInsertToken := insertTokenToUsersTable(resultHashed, phoneNumber)
-	w.WriteHeader(statusInsertToken)
-	if isStatusNotOK(w, statusInsertToken, messageInsertToken) {
-		return
-	}
-	userToken := requests.UserToken{phoneNumber, resultHashed}
-	routes.ServeJson(w, service.GetGeneralMsgType(statusInsertToken, messageInsertToken, userToken))
-}
-
-func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("phone_number")
-	userTokenJson := requests.PhoneNumberJson{}
-	service.DecodeJson(&userTokenJson, r.Body)
-	newphoneNumber := userTokenJson.PhoneNumber
-	if phoneNumber == "" {
-		w.WriteHeader(400)
-		routes.ServeJson(w, service.GetErrorMessageType(400, "data empty"))
-	} else {
-		resultHashed := hashedMobileNumber(phoneNumber)
-		field := fmt.Sprintf("phone_number = '%s', token = '%s'", newphoneNumber, resultHashed)
-		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
-		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-		userToken := requests.UserToken{newphoneNumber, resultHashed}
-		printResult(w, statusUpdate, messageUpdate, userToken)
-	}
-}
-
-func CreateUser(w http.ResponseWriter, r *http.Request) {
-	NewUser := atomicUser(newUserJson(r.Body))
-	if NewUser.PhoneNumber == "" {
-		w.WriteHeader(422)
-		routes.ServeJson(w, service.GetErrorMessageType(422, "phone_number is empty"))
-		return
-	}
-
-	mobileBytes := []byte(NewUser.PhoneNumber)
-	hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
-
-	if isErrNotNil(w, 508, err) {
-		return
-	}
-
-	SQL := fmt.Sprintf("INSERT INTO users SET user_name='%s', phone_number='%s', token = '%s'", NewUser.UserName, NewUser.PhoneNumber, hashedPassword)
-	status, message, newId := service.ExecuteInsertSqlResult(SQL)
-	userCreated := responses.UserCreated{int(newId), NewUser.UserName, NewUser.PhoneNumber, fmt.Sprintf("%s", hashedPassword)}
-	switch {
-	case status == http.StatusConflict:
-		// 1. Update user_name and token in users
-		field := fmt.Sprintf("user_name='%s', token = '%s'", NewUser.UserName, hashedPassword)
-		condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
-		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-		if isStatusNotOK(w, statusUpdate, messageUpdate) {
-			return
-		}
-		// 2. Get user_id
-		conditionSelect := fmt.Sprintf("phone_number = %s", NewUser.PhoneNumber)
-		sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
-		sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
+		condition := fmt.Sprintf("user_id = %v", id)
+		sequel := service.SelectQuery("user_id, user_name, phone_number, profile_picture", "users", condition)
+		sqlRow, err := service.ExecuteChannelSqlRow(sequel)
 		if isErrNotNil(w, 508, err) {
 			return
 		}
-		// 3. Check if result exists
-		errSqlRow := sqlRow.Scan(&userCreated.UserId)
+		errSqlRow := sqlRow.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
 		statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
-		if isStatusNotOK(w, statusRow, messageRow) {
+		printResult(w, statusRow, messageRow, user)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func GenerateNewToken(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		userId := 0
+		userTokenJson := model.PhoneNumberJson{}
+		service.DecodeJson(&userTokenJson, r.Body)
+
+		sqlRow, err := service.ExecuteChannelSqlRow(getUserIdSQL(userTokenJson.PhoneNumber))
+		if isErrNotNil(w, 508, err) {
 			return
 		}
-		// 4. Return existing mobile_phone with given user_name and new token
-		w.WriteHeader(statusRow)
-		routes.ServeJson(w, service.GetGeneralMsgType(statusRow, messageRow, userCreated))
-	default:
-		w.WriteHeader(status)
-		routes.ServeJson(w, service.GetGeneralMsgType(status, message, userCreated))
-	}
+		errSqlRow := sqlRow.Scan(&userId)
+		status, message := service.CheckScanRowSQL(errSqlRow)
+		if isStatusNotOK(w, status, message) {
+			return
+		}
+		phoneNumber := userTokenJson.PhoneNumber
+		resultHashed := hashedMobileNumber(phoneNumber)
+		statusInsertToken, messageInsertToken := insertTokenToUsersTable(resultHashed, phoneNumber)
+		w.WriteHeader(statusInsertToken)
+		if isStatusNotOK(w, statusInsertToken, messageInsertToken) {
+			return
+		}
+		userToken := model.UserToken{phoneNumber, resultHashed}
+		routes.ServeJson(w, service.GetGeneralMsgType(statusInsertToken, messageInsertToken, userToken))
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		phoneNumber := r.Header.Get("phone_number")
+		userTokenJson := model.PhoneNumberJson{}
+		service.DecodeJson(&userTokenJson, r.Body)
+		newphoneNumber := userTokenJson.PhoneNumber
+		if phoneNumber == "" {
+			w.WriteHeader(400)
+			routes.ServeJson(w, service.GetErrorMessageType(400, "data empty"))
+		} else {
+			resultHashed := hashedMobileNumber(phoneNumber)
+			field := fmt.Sprintf("phone_number = '%s', token = '%s'", newphoneNumber, resultHashed)
+			condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+			statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+			userToken := model.UserToken{newphoneNumber, resultHashed}
+			printResult(w, statusUpdate, messageUpdate, userToken)
+		}
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func CreateUser(w http.ResponseWriter, r *http.Request) {
+	chanCreate := make(chan model.GeneralMsg)
+	go func() {
+		NewUser := atomicUser(newUserJson(r.Body))
+		if NewUser.PhoneNumber == "" {
+			chanCreate <- model.GeneralMsg{422, "phone_number is empty", NewUser}
+			return
+		}
+
+		mobileBytes := []byte(NewUser.PhoneNumber)
+		hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
+
+		if isErrNotNil(w, 508, err) {
+			chanCreate <- model.GeneralMsg{508, err.Error(), NewUser}
+			return
+		}
+
+		NewUser.Token = fmt.Sprintf("%s", hashedPassword)
+
+		field := fmt.Sprintf("user_name='%s', phone_number='%s', token = '%s', device_id = '%s', device_type = '%s', user_agent = '%s', status = '%s'",
+			NewUser.UserName, NewUser.PhoneNumber, NewUser.Token, NewUser.DeviceId, NewUser.DeviceType, NewUser.UserAgent, NewUser.Status)
+		SQL := fmt.Sprintf("INSERT INTO users SET %s", field)
+		status, message, newId := service.ExecuteInsertSqlResult(SQL)
+		switch {
+		case status == http.StatusConflict:
+			// 1. Update user_name and token in users
+			condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
+			statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+			if isStatusNotOK(w, statusUpdate, messageUpdate) {
+				return
+			}
+			// 2. Get user_id
+			conditionSelect := fmt.Sprintf("phone_number = %s", NewUser.PhoneNumber)
+			sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
+			sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
+			if isErrNotNil(w, 508, err) {
+				return
+			}
+			// 3. Check if result exists
+			errSqlRow := sqlRow.Scan(&NewUser.UserId)
+			statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
+			if isStatusNotOK(w, statusRow, messageRow) {
+				return
+			}
+			// 4. Return existing mobile_phone with given user_name and new token
+			chanCreate <- model.GeneralMsg{statusRow, messageRow, NewUser}
+		default:
+			NewUser.UserId = int(newId)
+			chanCreate <- model.GeneralMsg{status, message, NewUser}
+		}
+	}()
+	resChanCreate := <-chanCreate
+	status := resChanCreate.Status
+	w.WriteHeader(status)
+	routes.ServeJson(w, service.GetGeneralMsgType(status, resChanCreate.Message, resChanCreate.Data))
 }
 
 func UpdateUserName(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("phone_number")
-	updateUserName := requests.UpdateUserName{}
-	service.DecodeJson(&updateUserName, r.Body)
-	userName := updateUserName.UserName
-	table := "users"
-	field := fmt.Sprintf("user_name='%s'", userName)
-	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
-	statusUpdate, messageUpdate := service.UpdateQuery(table, field, condition)
-	w.WriteHeader(statusUpdate)
-	printResult(w, statusUpdate, messageUpdate, requests.UserUpdateType{userName, phoneNumber})
+	go func() {
+		phoneNumber := r.Header.Get("phone_number")
+		updateUserName := model.UpdateUserName{}
+		service.DecodeJson(&updateUserName, r.Body)
+		userName := updateUserName.UserName
+		table := "users"
+		field := fmt.Sprintf("user_name='%s'", userName)
+		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery(table, field, condition)
+		printResult(w, statusUpdate, messageUpdate, model.UserUpdateType{userName, phoneNumber})
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+
 }
 
-func DeleteUser(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("phone_number")
-	SQL := fmt.Sprintf("Delete FROM users WHERE phone_number = '%s'", phoneNumber)
-
-	statusResult, messageResult := service.ExecuteChannelSqlResult(SQL)
-	printResult(w, statusResult, messageResult, requests.PhoneNumberJson{phoneNumber})
+func UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		phoneNumber := r.Header.Get("phone_number")
+		updateStatus := model.UpdateUserStatus{}
+		service.DecodeJson(&updateStatus, r.Body)
+		userStatus := updateStatus.Status
+		table := "users"
+		field := fmt.Sprintf("status='%s'", userStatus)
+		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery(table, field, condition)
+		printResult(w, statusUpdate, messageUpdate, model.RespUpdateUserStatus{phoneNumber, userStatus})
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+func UpdateUserProfile(w http.ResponseWriter, r *http.Request, params martini.Params) {
+	go func() {
+		id, _ := strconv.Atoi(params["id"])
+		file, header, err := r.FormFile("file")
+		if isErrNotNil(w, http.StatusNotAcceptable, err) {
+			return
+		}
+		fileType := header.Header.Get("Content-Type")
+		status, info := uploadCloudinary(file, fileType)
+		if isStatusNotOK(w, status, info) {
+			return
+		}
+		phoneNumber := r.Header.Get("phone_number")
+		cloudinaryPath := info
+		userName := r.FormValue("user_name")
+		userStatus := r.FormValue("status")
+		field := fmt.Sprintf("user_name = '%s', profile_picture = '%s', status = '%s'", userName, cloudinaryPath, userStatus)
+		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+		profileUpdate := model.ProfileUpdateType{id, userName, userStatus, cloudinaryPath}
+		printResult(w, statusUpdate, messageUpdate, profileUpdate)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
 }
 
 func UploadFile(w http.ResponseWriter, r *http.Request) {
-	phoneNumber := r.Header.Get("phone_number")
-	file, header, err := r.FormFile("file")
+	go func() {
+		phoneNumber := r.Header.Get("phone_number")
+
+		file, header, err := r.FormFile("file")
+		if isErrNotNil(w, http.StatusNotAcceptable, err) {
+			return
+		}
+
+		fileType := header.Header.Get("Content-Type")
+		status, info := uploadCloudinary(file, fileType)
+		if isStatusNotOK(w, status, info) {
+			return
+		}
+
+		cloudinaryPath := info
+		field := fmt.Sprintf("profile_picture = '%s'", cloudinaryPath)
+		condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
+		statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
+		profilePictureUser := model.UserProfilePictureType{phoneNumber, cloudinaryPath}
+		printResult(w, statusUpdate, messageUpdate, profilePictureUser)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func DeleteUser(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		phoneNumber := r.Header.Get("phone_number")
+		SQL := fmt.Sprintf("Delete FROM users WHERE phone_number = '%s'", phoneNumber)
+
+		statusResult, messageResult := service.ExecuteChannelSqlResult(SQL)
+		printResult(w, statusResult, messageResult, model.PhoneNumberJson{phoneNumber})
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func BlockFriend(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		block := 0
+		status, phoneNumber := getStatusphoneNumber(r)
+		friendPhoneNumber := decodeActionFriendMobilePhone(r.Body)
+		status, message := blockFriend(phoneNumber, friendPhoneNumber, block)
+		printDefaultMessage(w, status, message)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+func UnBlockFriend(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		block := 0
+		status, phoneNumber := getStatusphoneNumber(r)
+		friendPhoneNumber := decodeActionFriendphoneNumber(r.Body)
+		status, message := sqlDeleteFriendRelationship(phoneNumber, friendPhoneNumber, block)
+		printDefaultMessage(w, status, message)
+		chanFinish <- true
+	}()
+	_ = <-chanFinish
+}
+
+//User Controller Private Function
+func uploadCloudinary(file multipart.File, fileType string) (int, string) {
 	statusNotAcceptable := http.StatusNotAcceptable
-	// 1. Get file from form-data
-	if isErrNotNil(w, statusNotAcceptable, err) {
-		return
-	}
-	// 2. Read file
-	fileType := header.Header.Get("Content-Type")
+	// 1. Check file content type
 
 	if !allowedImageType(fileType) {
-		w.WriteHeader(http.StatusUnsupportedMediaType)
-		routes.ServeJson(w, service.GetErrorMessageType(http.StatusUnsupportedMediaType, "type is not allowed"))
-		return
+		return http.StatusUnsupportedMediaType, "type is not allowed"
 	}
-	// 3. Generate new filename
+	// 2. Generate new filename
 	nameFile, errNewPath := service.GenerateNewPath()
-	if isErrNotNil(w, statusNotAcceptable, errNewPath) {
-		return
+	if errNewPath != nil {
+		return statusNotAcceptable, errNewPath.Error()
 	}
-	// 4. Read multipart file
+	// 3. Read multipart file
 
 	buff, errReadFile := ioutil.ReadAll(file)
-	if isErrNotNil(w, statusNotAcceptable, errReadFile) {
-		return
+	if errReadFile != nil {
+		return statusNotAcceptable, errReadFile.Error()
 	}
-	//5. Upload to cloudinary
+	//4. Upload to cloudinary
 	resChannelUpload := service.UploadImage(nameFile, buff)
 	cloudinaryInfo := <-resChannelUpload
 	close(resChannelUpload)
 	if cloudinaryInfo.Err != nil {
 		internalServerStatus := http.StatusInternalServerError
-		w.WriteHeader(internalServerStatus)
-		routes.ServeJson(w, service.GetErrorMessageType(internalServerStatus, "internal server error with cloudinary"))
-		return
+		return internalServerStatus, "internal server error with cloudinary"
 	}
-	// 6. Update cloudinary path to profile user
+	// 5. Return cludinary path
 	cloudinaryPath := cloudinaryInfo.FilePath
-	field := fmt.Sprintf("profile_picture = '%s'", cloudinaryPath)
-	condition := fmt.Sprintf("phone_number = '%s'", phoneNumber)
-	statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
-	profilePictureUser := requests.UserProfilePictureType{phoneNumber, cloudinaryPath}
-	printResult(w, statusUpdate, messageUpdate, profilePictureUser)
+	return http.StatusOK, cloudinaryPath
 }
-
-func BlockFriend(w http.ResponseWriter, r *http.Request) {
-	block := 0
-	status, phoneNumber := getStatusphoneNumber(r)
-	friendPhoneNumber := decodeActionFriendMobilePhone(r.Body)
-	status, message := blockFriend(phoneNumber, friendPhoneNumber, block)
-	printDefaultMessage(w, status, message)
-}
-
-func UnBlockFriend(w http.ResponseWriter, r *http.Request) {
-	block := 0
-	status, phoneNumber := getStatusphoneNumber(r)
-	friendPhoneNumber := decodeActionFriendphoneNumber(r.Body)
-	status, message := sqlDeleteFriendRelationship(phoneNumber, friendPhoneNumber, block)
-	printDefaultMessage(w, status, message)
-}
-
-//User Controller Private Function
-
 func printDefaultMessage(w http.ResponseWriter, status int, message string) {
 	w.WriteHeader(status)
 	routes.ServeJson(w, service.GetDefaultMessage(status, message))
 }
 func decodeActionFriendMobilePhone(body io.ReadCloser) string {
-	actionToFriend := requests.ActionToFriend{}
+	actionToFriend := model.ActionToFriend{}
 	service.DecodeJson(&actionToFriend, body)
 	return actionToFriend.PhoneNumber
 }
@@ -275,12 +372,12 @@ func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
 }
 
 func printResult(w http.ResponseWriter, status int, message string, valueType interface{}) {
-	w.WriteHeader(status)
 	if isStatusNotOK(w, status, message) {
-		routes.ServeJson(w, service.GetErrorMessageType(status, message))
 		return
+	} else {
+		w.WriteHeader(status)
+		routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
 	}
-	routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
 }
 
 func selectUserSQL(condition string) string {
@@ -340,7 +437,7 @@ func sqlDeleteFriendRelationship(phoneNumber string, friendphoneNumber string, f
 }
 
 func decodeActionFriendphoneNumber(body io.ReadCloser) string {
-	actionToFriend := requests.ActionToFriend{}
+	actionToFriend := model.ActionToFriend{}
 	service.DecodeJson(&actionToFriend, body)
 	return actionToFriend.PhoneNumber
 }
@@ -370,11 +467,11 @@ func blockFriend(phoneNumber string, friendPhoneNumber string, status int) (int,
 	}
 }
 
-func mapUsers(rows *sql.Rows) chan responses.GeneralArrMsg {
-	users := atomicUsers(responses.GeneralArrMsg{})
-	chanUsers := make(chan responses.GeneralArrMsg)
+func mapUsers(rows *sql.Rows) chan model.GeneralArrMsg {
+	users := atomicUsers(model.GeneralArrMsg{})
+	chanUsers := make(chan model.GeneralArrMsg)
 	go func() {
-		chanUser := make(chan requests.User)
+		chanUser := make(chan model.User)
 		for rows.Next() {
 			go assignedMapedUsers(rows, chanUser)
 			resChanUser := <-chanUser
@@ -386,8 +483,8 @@ func mapUsers(rows *sql.Rows) chan responses.GeneralArrMsg {
 	return chanUsers
 }
 
-func assignedMapedUsers(rows *sql.Rows, chanUser chan requests.User) chan requests.User {
-	user := atomicUser(requests.User{})
+func assignedMapedUsers(rows *sql.Rows, chanUser chan model.User) chan model.User {
+	user := atomicUser(model.User{})
 	rows.Scan(&user.UserId, &user.UserName, &user.PhoneNumber, &user.ProfilePicture)
 	chanUser <- user
 	return chanUser
@@ -432,23 +529,23 @@ func updateUserExecutor(sequel string) (int, string) {
 	return service.ExecuteUpdateSqlResult(sequel)
 }
 
-func atomicUser(user requests.User) requests.User {
+func atomicUser(user model.User) model.User {
 	service.MutexTime()
 	executionUser.Store(user)
-	dataUser := executionUser.Load().(requests.User)
+	dataUser := executionUser.Load().(model.User)
 	return dataUser
 }
 
-func atomicUsers(users responses.GeneralArrMsg) responses.GeneralArrMsg {
+func atomicUsers(users model.GeneralArrMsg) model.GeneralArrMsg {
 	service.MutexTime()
 	executionUsers.Store(users)
-	dataUsers := executionUsers.Load().(responses.GeneralArrMsg)
+	dataUsers := executionUsers.Load().(model.GeneralArrMsg)
 	return dataUsers
 }
 
-func newUserJson(body io.ReadCloser) requests.User {
+func newUserJson(body io.ReadCloser) model.User {
 	decoder := json.NewDecoder(body)
-	NewUser := requests.User{}
+	NewUser := model.User{}
 	decoder.Decode(&NewUser)
 	return NewUser
 }
