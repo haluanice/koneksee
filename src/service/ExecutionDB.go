@@ -11,7 +11,7 @@ import (
 var database *sql.DB
 
 func NewDatabase(dbName string) {
-	dataBaseCredentials := fmt.Sprintf("root:z@/%s", dbName)
+	dataBaseCredentials := fmt.Sprintf("root:@/%s", dbName)
 	database, _ = sql.Open("mysql", dataBaseCredentials)
 }
 

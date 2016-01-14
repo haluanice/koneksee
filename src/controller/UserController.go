@@ -136,11 +136,11 @@ func UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
-	chanCreate := make(chan model.GeneralMsg)
+	chanCreateUser := make(chan model.GeneralMsg)
 	go func() {
 		NewUser := atomicUser(newUserJson(r.Body))
 		if NewUser.PhoneNumber == "" {
-			chanCreate <- model.GeneralMsg{422, "phone_number is empty", NewUser}
+			chanCreateUser <- model.GeneralMsg{422, "phone_number is empty", NewUser}
 			return
 		}
 
@@ -148,7 +148,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		hashedPassword, err := bcrypt.GenerateFromPassword(mobileBytes, 10)
 
 		if err != nil {
-			chanCreate <- model.GeneralMsg{508, err.Error(), NewUser}
+			chanCreateUser <- model.GeneralMsg{508, err.Error(), NewUser}
 			return
 		}
 
@@ -164,7 +164,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 			condition := fmt.Sprintf("phone_number = '%s'", NewUser.PhoneNumber)
 			statusUpdate, messageUpdate := service.UpdateQuery("users", field, condition)
 			if statusUpdate != http.StatusOK {
-				chanCreate <- model.GeneralMsg{statusUpdate, messageUpdate, NewUser}
+				chanCreateUser <- model.GeneralMsg{statusUpdate, messageUpdate, NewUser}
 				return
 			}
 			// 2. Get user_id
@@ -172,27 +172,25 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 			sequelSelect := service.SelectQuery("user_id", "users", conditionSelect)
 			sqlRow, err := service.ExecuteChannelSqlRow(sequelSelect)
 			if err != nil {
-				chanCreate <- model.GeneralMsg{508, err.Error(), NewUser}
+				chanCreateUser <- model.GeneralMsg{508, err.Error(), NewUser}
 				return
 			}
 			// 3. Check if result exists
 			errSqlRow := sqlRow.Scan(&NewUser.UserId)
 			statusRow, messageRow := service.CheckScanRowSQL(errSqlRow)
 			if statusUpdate != http.StatusOK {
-				chanCreate <- model.GeneralMsg{statusRow, messageRow, NewUser}
+				chanCreateUser <- model.GeneralMsg{statusRow, messageRow, NewUser}
 				return
 			}
 			// 4. Return existing mobile_phone with given user_name and new token
-			chanCreate <- model.GeneralMsg{statusRow, messageRow, NewUser}
+			chanCreateUser <- model.GeneralMsg{statusRow, messageRow, NewUser}
 		default:
 			NewUser.UserId = int(newId)
-			chanCreate <- model.GeneralMsg{status, message, NewUser}
+			chanCreateUser <- model.GeneralMsg{status, message, NewUser}
 		}
 	}()
-	resChanCreate := <-chanCreate
-	status := resChanCreate.Status
-	w.WriteHeader(status)
-	routes.ServeJson(w, service.GetGeneralMsgType(status, resChanCreate.Message, resChanCreate.Data))
+	resChanCreateUser := <-chanCreateUser
+	writeGeneralMssg(w, resChanCreateUser.Status, resChanCreateUser.Message, resChanCreateUser.Data)
 }
 
 func UpdateUserName(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +314,7 @@ func UnBlockFriend(w http.ResponseWriter, r *http.Request) {
 }
 
 //User Controller Private Function
+//
 func uploadCloudinary(file multipart.File, fileType string) (int, string) {
 	statusNotAcceptable := http.StatusNotAcceptable
 	// 1. Check file content type
@@ -358,8 +357,7 @@ func decodeActionFriendMobilePhone(body io.ReadCloser) string {
 
 func isErrNotNil(w http.ResponseWriter, status int, err error) bool {
 	if err != nil {
-		w.WriteHeader(status)
-		routes.ServeJson(w, service.GetErrorMessageType(status, err.Error()))
+		writeErrMssg(w, status, err.Error())
 		return true
 	}
 	return false
@@ -367,8 +365,7 @@ func isErrNotNil(w http.ResponseWriter, status int, err error) bool {
 
 func isStatusNotOK(w http.ResponseWriter, status int, message string) bool {
 	if status != http.StatusOK {
-		w.WriteHeader(status)
-		routes.ServeJson(w, service.GetErrorMessageType(status, message))
+		writeErrMssg(w, status, message)
 		return true
 	}
 	return false
@@ -378,8 +375,7 @@ func printResult(w http.ResponseWriter, status int, message string, valueType in
 	if isStatusNotOK(w, status, message) {
 		return
 	} else {
-		w.WriteHeader(status)
-		routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
+		writeGeneralMssg(w, status, message, valueType)
 	}
 }
 
@@ -391,8 +387,7 @@ func resultSelectUserSQL(w http.ResponseWriter, sequel string) {
 	rows, err := service.ExecuteChannelSqlRows(sequel)
 	internalServerStatus := http.StatusInternalServerError
 	if isErrNotNil(w, internalServerStatus, err) {
-		w.WriteHeader(internalServerStatus)
-		routes.ServeJson(w, service.GetErrorMessageType(internalServerStatus, err.Error()))
+		writeErrMssg(w, internalServerStatus, err.Error())
 		return
 	}
 	select {
@@ -402,8 +397,7 @@ func resultSelectUserSQL(w http.ResponseWriter, sequel string) {
 			resChanUsers.Datas = betterEmptyThanNil
 		}
 		statusOK := http.StatusOK
-		w.WriteHeader(statusOK)
-		routes.ServeJson(w, service.GetGeneralMsgType(statusOK, "success", resChanUsers))
+		writeGeneralMssg(w, statusOK, "success", resChanUsers)
 	case <-service.TimeOutInMilis(service.GlobalTimeOutDB):
 		printDefaultMessage(w, 508, "request timeout")
 	}
@@ -556,4 +550,12 @@ func newUserJson(body io.ReadCloser) model.User {
 func getUserIdSQL(phoneNumber string) string {
 	condition := fmt.Sprintf(" phone_number = '%s'", phoneNumber)
 	return service.SelectQuery("user_id", "users", condition)
+}
+func writeErrMssg(w http.ResponseWriter, status int, message string) {
+	w.WriteHeader(status)
+	routes.ServeJson(w, service.GetErrorMessageType(status, message))
+}
+func writeGeneralMssg(w http.ResponseWriter, status int, message string, valueType interface{}) {
+	w.WriteHeader(status)
+	routes.ServeJson(w, service.GetGeneralMsgType(status, message, valueType))
 }
